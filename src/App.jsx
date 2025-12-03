@@ -1124,10 +1124,11 @@ const AiNotebook = () => {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || !apiKey) return;
+  const handleSend = async (text = null) => {
+    const msgText = text || input;
+    if (!msgText.trim() || !apiKey) return;
 
-    const userMsg = { role: 'user', text: input };
+    const userMsg = { role: 'user', text: msgText };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
@@ -1210,7 +1211,23 @@ const AiNotebook = () => {
           {messages.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-gray-300">
               <MessageSquare size={64} className="mb-4 opacity-20" />
-              <p>ถามอะไรก็ได้เกี่ยวกับเอกสารของคุณ</p>
+              <p className="mb-6">ถามอะไรก็ได้เกี่ยวกับเอกสารของคุณ</p>
+              <div className="grid grid-cols-2 gap-3 w-full max-w-md px-4">
+                {[
+                  { label: '📝 สรุปเนื้อหา', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
+                  { label: '🧠 แผนผังความคิด', prompt: 'ช่วยเขียนแผนผังความคิด (Mind Map) เชื่อมโยงประเด็นต่างๆ ในเอกสารให้หน่อย' },
+                  { label: '🔑 ประเด็นสำคัญ', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
+                  { label: '❓ ตั้งคำถามทดสอบ', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
+                ].map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setInput(item.prompt); handleSend(item.prompt); }}
+                    className="p-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all text-left shadow-sm"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {messages.map((msg, i) => (
