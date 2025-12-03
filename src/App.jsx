@@ -1192,8 +1192,15 @@ const MarkmapView = ({ markdown }) => {
 
 // 10. AI Notebook (Chat with Documents)
 const AiNotebook = () => {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [showApiKeyModal, setShowApiKeyModal] = useState(!localStorage.getItem('gemini_api_key'));
+  const [apiKey, setApiKey] = useState(() => {
+    return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
+  });
+
+  const [showApiKeyModal, setShowApiKeyModal] = useState(() => {
+    const stored = localStorage.getItem('gemini_api_key');
+    const envVar = import.meta.env.VITE_GEMINI_API_KEY;
+    return !stored && !envVar;
+  });
 
   const handleSaveApiKey = (key) => {
     if (key.trim()) {
