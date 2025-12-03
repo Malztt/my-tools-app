@@ -983,8 +983,8 @@ const App = () => {
     // General Tools
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet, category: 'เครื่องมือทั่วไป' },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode, category: 'เครื่องมือทั่วไป' },
-    { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link, category: 'เครื่องมือทั่วไป' },
-    { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search, category: 'เครื่องมือทั่วไป' },
+    { id: 'shorten', label: 'ย่อลิงก์', icon: Link, category: 'เครื่องมือทั่วไป' },
+    { id: 'ocsc', label: 'ระบบรับรองคุณวุฒิ ก.พ.', icon: Search, category: 'เครื่องมือทั่วไป' },
   ];
 
   return (
