@@ -477,7 +477,7 @@ const GeminiOCR = () => {
     setLoading(true); setError(''); setText('');
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1138,7 +1138,7 @@ const AiNotebook = () => {
       const context = files.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
       const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
