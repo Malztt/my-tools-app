@@ -972,15 +972,18 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const tools = [
-    { id: 'ocr', label: 'Gemini OCR', icon: Zap },
-    { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search },
-    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
-    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
-    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
-    { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link },
-    { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
-    { id: 'compress_pdf', label: 'จัดการ PDF', icon: FileType },
-    { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
+    // PDF & Image Tools
+    { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType, category: 'PDF & รูปภาพ' },
+    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files, category: 'PDF & รูปภาพ' },
+    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2, category: 'PDF & รูปภาพ' },
+    { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage, category: 'PDF & รูปภาพ' },
+    { id: 'ocr', label: 'ดึงข้อความจากไฟล์', icon: Zap, category: 'PDF & รูปภาพ' },
+
+    // General Tools
+    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet, category: 'เครื่องมือทั่วไป' },
+    { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode, category: 'เครื่องมือทั่วไป' },
+    { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link, category: 'เครื่องมือทั่วไป' },
+    { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search, category: 'เครื่องมือทั่วไป' },
   ];
 
   return (
@@ -989,7 +992,30 @@ const App = () => {
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-3 mb-10"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white"><Layout size={24} /></div><div><h1 className="font-bold text-xl">WorkTools</h1><p className="text-xs text-gray-400">Real & Functional</p></div></div>
-          <nav className="space-y-2">{tools.map(t => <button key={t.id} onClick={() => { setActiveTab(t.id); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}><t.icon size={20} /><span>{t.label}</span></button>)}</nav>
+          <nav className="space-y-6">
+            {['PDF & รูปภาพ', 'เครื่องมือทั่วไป'].map((category) => (
+              <div key={category}>
+                <h3 className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                  {category}
+                </h3>
+                <div className="space-y-1">
+                  {tools.filter(t => t.category === category).map((tool) => (
+                    <button
+                      key={tool.id}
+                      onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
+                      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
+                          ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
+                    >
+                      <tool.icon size={20} />
+                      <span className="font-medium">{tool.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
         </div>
       </aside>
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
