@@ -872,49 +872,94 @@ const ExcelConverter = () => {
   );
 };
 
-// 9. PDF Merger (Merge Multiple PDFs)
+// 9. PDF Merger (Merge Multiple PDFs - Page Level)
 const PdfMerger = () => {
-  const [files, setFiles] = useState([]);
+  const [pages, setPages] = useState([]); // { id, file, pageIndex, thumbnail }
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [resultPdf, setResultPdf] = useState(null);
 
-  const handleFileChange = (e) => {
-    if (e.target.files) {
-      setFiles(prev => [...prev, ...Array.from(e.target.files)]);
+  const handleFileChange = async (e) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+
+    setIsProcessing(true);
+    setStatusMsg('กำลังอ่านไฟล์และแยกหน้า...');
+
+    const newPages = [];
+    const files = Array.from(e.target.files);
+
+    try {
+      for (const file of files) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 0.3 }); // Low scale for thumbnail
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          await page.render({ canvasContext: context, viewport: viewport }).promise;
+          const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
+
+          newPages.push({
+            id: `${file.name}-${i}-${Date.now()}-${Math.random()}`,
+            file: file,
+            pageIndex: i - 1, // 0-based index for pdf-lib
+            pageNumber: i,    // 1-based for display
+            thumbnail: thumbnail,
+            fileName: file.name
+          });
+        }
+      }
+
+      setPages(prev => [...prev, ...newPages]);
       setResultPdf(null);
+      setStatusMsg('');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาดในการอ่านไฟล์: ' + err.message);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const removeFile = (index) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
+  const removePage = (index) => {
+    setPages(prev => prev.filter((_, i) => i !== index));
   };
 
   const onDragEnd = (result) => {
     if (!result.destination) return;
-    const items = Array.from(files);
+    const items = Array.from(pages);
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
-    setFiles(items);
+    setPages(items);
   };
 
   const mergePdfs = async () => {
-    if (files.length < 2) {
-      setStatusMsg('กรุณาเลือกไฟล์ PDF อย่างน้อย 2 ไฟล์');
+    if (pages.length === 0) {
+      setStatusMsg('กรุณาเพิ่มไฟล์ PDF');
       return;
     }
     setIsProcessing(true);
     setStatusMsg('กำลังรวมไฟล์...');
 
     try {
-      // const PDFLib = await import('pdf-lib');
       const mergedPdf = await PDFDocument.create();
+      const loadedDocs = new Map(); // Cache loaded docs: Map<File, PDFDocument>
 
-      for (const file of files) {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await PDFDocument.load(arrayBuffer);
-        const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      for (const page of pages) {
+        let srcDoc = loadedDocs.get(page.file);
+        if (!srcDoc) {
+          const arrayBuffer = await page.file.arrayBuffer();
+          srcDoc = await PDFDocument.load(arrayBuffer);
+          loadedDocs.set(page.file, srcDoc);
+        }
+
+        const [copiedPage] = await mergedPdf.copyPages(srcDoc, [page.pageIndex]);
+        mergedPdf.addPage(copiedPage);
       }
 
       const pdfBytes = await mergedPdf.save();
@@ -932,9 +977,9 @@ const PdfMerger = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">รวมไฟล์ PDF (Merge)</h2>
+        <h2 className="text-2xl font-bold text-gray-800">รวมไฟล์ PDF (จัดเรียงหน้าได้)</h2>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -943,30 +988,48 @@ const PdfMerger = () => {
             <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
             <div className="bg-red-100 text-red-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><Files size={32} /></div>
             <p className="font-medium text-gray-700">เพิ่มไฟล์ PDF (เลือกได้หลายไฟล์)</p>
+            <p className="text-xs text-gray-400 mt-2">ระบบจะแยกทุกหน้าออกมาให้คุณจัดเรียงใหม่ได้</p>
           </div>
 
-          {files.length > 0 && (
+          {pages.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-700">รายการไฟล์ ({files.length}) - ลากเพื่อจัดลำดับ</p>
+              <div className="flex justify-between items-center">
+                <p className="text-sm font-medium text-gray-700">รายการหน้า ({pages.length}) - ลากเพื่อจัดลำดับ</p>
+                <button onClick={() => setPages([])} className="text-xs text-red-500 hover:text-red-700">ล้างทั้งหมด</button>
+              </div>
+
               <DragDropContext onDragEnd={onDragEnd}>
-                <Droppable droppableId="pdf-list">
+                <Droppable droppableId="page-grid" direction="horizontal">
                   {(provided) => (
-                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                      {files.map((f, i) => (
-                        <Draggable key={`${f.name}-${i}`} draggableId={`${f.name}-${i}`} index={i}>
+                    <div
+                      {...provided.droppableProps}
+                      ref={provided.innerRef}
+                      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200"
+                    >
+                      {pages.map((page, i) => (
+                        <Draggable key={page.id} draggableId={page.id} index={i}>
                           {(provided) => (
                             <div
                               ref={provided.innerRef}
                               {...provided.draggableProps}
-                              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group"
+                              {...provided.dragHandleProps}
+                              className="relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
                             >
-                              <div className="flex items-center gap-3 overflow-hidden">
-                                <div {...provided.dragHandleProps} className="text-gray-400 cursor-grab hover:text-gray-600">
-                                  <GripVertical size={16} />
-                                </div>
-                                <span className="truncate text-sm text-gray-600">{i + 1}. {f.name}</span>
+                              <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
+                                <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
                               </div>
-                              <button onClick={() => removeFile(i)} className="text-red-400 hover:text-red-600"><X size={16} /></button>
+                              <div className="text-xs text-gray-500 truncate" title={page.fileName}>{page.fileName}</div>
+                              <div className="text-xs font-bold text-gray-700">หน้า {page.pageNumber}</div>
+                              <button
+                                onClick={() => removePage(i)}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                              >
+                                <X size={12} />
+                              </button>
+                              <div className="absolute top-2 left-2 bg-black/50 text-white px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                {i + 1}
+                              </div>
                             </div>
                           )}
                         </Draggable>
@@ -981,12 +1044,11 @@ const PdfMerger = () => {
 
           <button
             onClick={mergePdfs}
-            disabled={isProcessing || files.length < 2}
+            disabled={isProcessing || pages.length === 0}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>รวมไฟล์ PDF</span></>}
+            {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Zap size={20} /><span>รวมไฟล์ PDF</span></>}
           </button>
-          {statusMsg && <p className="text-center text-sm text-gray-500">{statusMsg}</p>}
 
           {resultPdf && (
             <div className="space-y-4 animate-fade-in">
