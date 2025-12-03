@@ -1393,7 +1393,15 @@ const AiNotebook = () => {
       const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 'ขออภัย ไม่สามารถตอบคำถามได้';
       setMessages(prev => [...prev, { role: 'ai', text: aiResponse }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'ai', text: `Error: ${err.message}` }]);
+      const errorMessage = err.message || '';
+      if (errorMessage.includes('API key') || errorMessage.includes('leaked') || errorMessage.includes('403')) {
+        setMessages(prev => [...prev, { role: 'ai', text: 'Error: API Key invalid or expired. Please update your API Key.' }]);
+        localStorage.removeItem('gemini_api_key');
+        setApiKey('');
+        setShowApiKeyModal(true);
+      } else {
+        setMessages(prev => [...prev, { role: 'ai', text: `Error: ${errorMessage}` }]);
+      }
     } finally {
       setIsLoading(false);
     }
