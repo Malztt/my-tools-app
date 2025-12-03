@@ -1095,8 +1095,73 @@ const MermaidDiagram = ({ code }) => {
 // 10. AI Notebook (Chat with Documents)
 const AiNotebook = () => {
   const [apiKey, setApiKey] = useState('AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk');
-  const [files, setFiles] = useState([]);
-  const [messages, setMessages] = useState([]);
+
+  // Session Management
+  const [sessions, setSessions] = useState(() => {
+    const saved = localStorage.getItem('ai_notebook_sessions');
+    return saved ? JSON.parse(saved) : [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
+  });
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    return localStorage.getItem('ai_notebook_active_session') || sessions[0]?.id;
+  });
+
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+
+  // Derived state setters (helpers to update active session)
+  const setFiles = (newFiles) => {
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        const updatedFiles = typeof newFiles === 'function' ? newFiles(s.files) : newFiles;
+        return { ...s, files: updatedFiles };
+      }
+      return s;
+    }));
+  };
+
+  const setMessages = (newMessages) => {
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        const updatedMessages = typeof newMessages === 'function' ? newMessages(s.messages) : newMessages;
+        // Auto-update title based on first user message if it's "New Chat"
+        let newTitle = s.title;
+        if (s.title === 'New Chat' && updatedMessages.length > 0) {
+          const firstUserMsg = updatedMessages.find(m => m.role === 'user');
+          if (firstUserMsg) newTitle = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? '...' : '');
+        }
+        return { ...s, messages: updatedMessages, title: newTitle };
+      }
+      return s;
+    }));
+  };
+
+  // Persist to LocalStorage
+  useEffect(() => {
+    localStorage.setItem('ai_notebook_sessions', JSON.stringify(sessions));
+    localStorage.setItem('ai_notebook_active_session', activeSessionId);
+  }, [sessions, activeSessionId]);
+
+  const createNewChat = () => {
+    const newSession = { id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() };
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newSession.id);
+  };
+
+  const deleteSession = (e, sessionId) => {
+    e.stopPropagation();
+    const newSessions = sessions.filter(s => s.id !== sessionId);
+    if (newSessions.length === 0) {
+      // Always keep at least one
+      const newSession = { id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() };
+      setSessions([newSession]);
+      setActiveSessionId(newSession.id);
+    } else {
+      setSessions(newSessions);
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(newSessions[0].id);
+      }
+    }
+  };
+
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
@@ -1108,7 +1173,7 @@ const AiNotebook = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [activeSession.messages]); // Scroll when messages change
 
   const handleFileUpload = async (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -1161,7 +1226,7 @@ const AiNotebook = () => {
 
     try {
       // Construct context from files
-      const context = files.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
+      const context = activeSession.files.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
       const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
@@ -1186,40 +1251,67 @@ const AiNotebook = () => {
 
   return (
     <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] min-h-[600px] flex flex-col md:flex-row gap-6 animate-fade-in">
-      {/* Left Sidebar: Files */}
-      <div className="w-full md:w-1/3 flex flex-col gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-        <div className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
-          <NotebookPen size={24} />
-          <h2>เอกสารอ้างอิง</h2>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-2 min-h-[200px]">
-          {files.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400 text-center p-4 border-2 border-dashed border-gray-200 rounded-xl">
-              <Files size={48} className="mb-2 opacity-50" />
-              <p>ยังไม่มีเอกสาร</p>
-              <p className="text-xs">อัปโหลด PDF หรือ Text เพื่อเริ่มคุย</p>
-            </div>
-          ) : (
-            files.map((f, i) => (
-              <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group">
+      {/* Left Sidebar: Sessions & Files */}
+      <div className="w-full md:w-1/3 flex flex-col gap-4">
+        {/* Session List */}
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col max-h-[200px]">
+          <button onClick={createNewChat} className="w-full bg-indigo-600 text-white font-medium py-2 rounded-xl hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2 mb-3 shadow-sm">
+            <MessageSquare size={18} /> <span>New Chat</span>
+          </button>
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {sessions.map(session => (
+              <div
+                key={session.id}
+                onClick={() => setActiveSessionId(session.id)}
+                className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-indigo-50 border border-indigo-100' : 'hover:bg-gray-50 border border-transparent'}`}
+              >
                 <div className="flex items-center gap-2 overflow-hidden">
-                  <FileText size={16} className="text-gray-500 flex-shrink-0" />
-                  <span className="truncate text-sm text-gray-700">{f.name}</span>
+                  <MessageSquare size={14} className={activeSessionId === session.id ? 'text-indigo-600' : 'text-gray-400'} />
+                  <span className={`truncate text-sm ${activeSessionId === session.id ? 'font-medium text-indigo-900' : 'text-gray-600'}`}>{session.title}</span>
                 </div>
-                <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Trash2 size={16} />
+                <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-300 hover:text-red-500 p-1">
+                  <Trash2 size={14} />
                 </button>
               </div>
-            ))
-          )}
+            ))}
+          </div>
         </div>
 
-        <div className="relative">
-          <input type="file" accept=".pdf,.txt" multiple onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-          <button disabled={isProcessingFiles} className="w-full bg-indigo-50 text-indigo-600 font-medium py-3 rounded-xl hover:bg-indigo-100 transition-colors flex justify-center items-center gap-2 border border-indigo-200">
-            {isProcessingFiles ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span> : <><Upload size={20} /><span>เพิ่มเอกสาร</span></>}
-          </button>
+        {/* Files List */}
+        <div className="flex-1 flex flex-col bg-white p-4 rounded-2xl shadow-sm border border-gray-100 min-h-0">
+          <div className="flex items-center gap-2 text-indigo-600 font-bold text-lg mb-3">
+            <NotebookPen size={24} />
+            <h2>เอกสารอ้างอิง</h2>
+          </div>
+
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-[100px]">
+            {activeSession.files.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-gray-400 text-center p-4 border-2 border-dashed border-gray-200 rounded-xl">
+                <Files size={48} className="mb-2 opacity-50" />
+                <p>ยังไม่มีเอกสาร</p>
+                <p className="text-xs">อัปโหลด PDF หรือ Text เพื่อเริ่มคุย</p>
+              </div>
+            ) : (
+              activeSession.files.map((f, i) => (
+                <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <FileText size={16} className="text-gray-500 flex-shrink-0" />
+                    <span className="truncate text-sm text-gray-700">{f.name}</span>
+                  </div>
+                  <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="relative mt-3">
+            <input type="file" accept=".pdf,.txt" multiple onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <button disabled={isProcessingFiles} className="w-full bg-indigo-50 text-indigo-600 font-medium py-3 rounded-xl hover:bg-indigo-100 transition-colors flex justify-center items-center gap-2 border border-indigo-200">
+              {isProcessingFiles ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span> : <><Upload size={20} /><span>เพิ่มเอกสาร</span></>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1234,7 +1326,7 @@ const AiNotebook = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/30">
-          {messages.length === 0 && (
+          {activeSession.messages.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-gray-300">
               <MessageSquare size={64} className="mb-4 opacity-20" />
               <p className="mb-6">ถามอะไรก็ได้เกี่ยวกับเอกสารของคุณ</p>
@@ -1256,7 +1348,7 @@ const AiNotebook = () => {
               </div>
             </div>
           )}
-          {messages.map((msg, i) => (
+          {activeSession.messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}`}>
                 {msg.text.includes('```mermaid') ? (
