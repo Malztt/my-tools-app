@@ -1386,7 +1386,7 @@ const AiNotebook = () => {
 
       const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1401,12 +1401,14 @@ const AiNotebook = () => {
       setMessages(prev => [...prev, { role: 'ai', text: aiResponse }]);
     } catch (err) {
       const errorMessage = err.message || '';
-      if (errorMessage.includes('API key') || errorMessage.includes('leaked') || errorMessage.includes('403')) {
-        setMessages(prev => [...prev, { role: 'ai', text: 'Error: API Key invalid or expired. Please update your API Key.' }]);
+      // Only auto-clear if it's definitely a key issue
+      if (errorMessage.includes('API key not valid') || errorMessage.includes('key expired') || errorMessage.includes('key leaked')) {
+        setMessages(prev => [...prev, { role: 'ai', text: `Error: ${errorMessage}. Please update your API Key.` }]);
         localStorage.removeItem('gemini_api_key');
         setApiKey('');
         setShowApiKeyModal(true);
       } else {
+        // Show raw error for other cases (e.g. 403, 404, quota)
         setMessages(prev => [...prev, { role: 'ai', text: `Error: ${errorMessage}` }]);
       }
     } finally {
