@@ -181,6 +181,7 @@ const PdfOptimizer = () => {
   const [processedPdf, setProcessedPdf] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [progress, setProgress] = useState(0);
+  const [compressionLevel, setCompressionLevel] = useState('medium'); // low, medium, high
 
   const handleFileChange = (e) => {
     if (e.target.files[0]) {
@@ -217,7 +218,20 @@ const PdfOptimizer = () => {
         setProgress(Math.round((i / numPages) * 100));
 
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 1.5 }); // Scale 1.5 for decent quality but smaller size
+
+        // Determine scale and quality based on compression level
+        let scale = 1.0;
+        let quality = 0.7;
+
+        if (compressionLevel === 'low') {
+          scale = 1.5;
+          quality = 0.8;
+        } else if (compressionLevel === 'high') {
+          scale = 0.75;
+          quality = 0.5;
+        }
+
+        const viewport = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
@@ -225,8 +239,8 @@ const PdfOptimizer = () => {
 
         await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-        // Convert to JPEG with 0.7 quality
-        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        // Convert to JPEG
+        const imgDataUrl = canvas.toDataURL('image/jpeg', quality);
         const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
 
         const jpgImage = await newPdfDoc.embedJpg(imgBytes);
@@ -288,6 +302,21 @@ const PdfOptimizer = () => {
                   {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg} ({progress}%)</span></> : <><Zap size={20} /><span>เริ่มบีบอัด (แปลงเป็นภาพ)</span></>}
                 </button>
                 <p className="text-xs text-gray-400 text-center">ระบบจะแปลงทุกหน้าเป็นรูปภาพเพื่อลดขนาดไฟล์ (ข้อความจะไม่สามารถค้นหาได้)</p>
+
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
+                  <p className="text-sm font-medium text-gray-700">ระดับการบีบอัด (คุณภาพ vs ขนาด)</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => setCompressionLevel('low')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'low' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      ต่ำ (ชัด)
+                    </button>
+                    <button onClick={() => setCompressionLevel('medium')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'medium' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      กลาง (สมดุล)
+                    </button>
+                    <button onClick={() => setCompressionLevel('high')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'high' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      สูง (เล็กสุด)
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="space-y-4 animate-fade-in">
