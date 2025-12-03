@@ -1447,7 +1447,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.7</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.8</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
@@ -1660,7 +1660,7 @@ const AiNotebook = () => {
           <div className="space-y-3">
             {[
               { label: 'Summarize', icon: '📝', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-              { label: 'Mind Map', icon: '🧠', prompt: 'สร้าง Mind Map สรุปเนื้อหาด้วย Markdown List (ใช้ - เท่านั้น) **ต้อง**ใส่ใน code block ```markmap ... ``` เสมอ ห้ามตอบเป็นข้อความธรรมดา' },
+              { label: 'Mind Map', icon: '🧠', prompt: 'Generate a Mind Map summarizing the content. Use Markdown List format (use - for all levels). Enclose strictly in a ```markmap code block. Do not add any explanation or conversational text. Output ONLY the code block.' },
               { label: 'Key Points', icon: '🔑', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
               { label: 'Quiz Me', icon: '❓', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
             ].map((item, i) => (
