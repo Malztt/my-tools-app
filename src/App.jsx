@@ -1224,7 +1224,8 @@ const AiNotebook = () => {
         newFiles.push({
           name: file.name,
           type: file.type,
-          content: content
+          content: content,
+          selected: true
         });
       } catch (err) {
         console.error("Error reading file:", err);
@@ -1239,6 +1240,15 @@ const AiNotebook = () => {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const toggleFileSelection = (index) => {
+    setFiles(prev => prev.map((f, i) => i === index ? { ...f, selected: !f.selected } : f));
+  };
+
+  const toggleSelectAll = () => {
+    const allSelected = activeSession.files.every(f => f.selected);
+    setFiles(prev => prev.map(f => ({ ...f, selected: !allSelected })));
+  };
+
   const handleSend = async (text = null) => {
     const msgText = text || input;
     if (!msgText.trim() || !apiKey) return;
@@ -1249,8 +1259,16 @@ const AiNotebook = () => {
     setIsLoading(true);
 
     try {
-      // Construct context from files
-      const context = activeSession.files.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
+      // Construct context from SELECTED files only
+      const selectedFiles = activeSession.files.filter(f => f.selected !== false); // Default to true if undefined
+      const context = selectedFiles.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
+
+      if (!context) {
+        setMessages(prev => [...prev, { role: 'ai', text: 'กรุณาเลือกเอกสารอย่างน้อย 1 ไฟล์เพื่อใช้เป็นข้อมูลอ้างอิง' }]);
+        setIsLoading(false);
+        return;
+      }
+
       const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
@@ -1303,9 +1321,22 @@ const AiNotebook = () => {
 
         {/* Files List */}
         <div className="flex-1 flex flex-col bg-white p-4 rounded-2xl shadow-sm border border-gray-100 min-h-0">
-          <div className="flex items-center gap-2 text-indigo-600 font-bold text-lg mb-3">
-            <NotebookPen size={24} />
-            <h2>เอกสารอ้างอิง</h2>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
+              <NotebookPen size={24} />
+              <h2>เอกสารอ้างอิง</h2>
+            </div>
+            {activeSession.files.length > 0 && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={activeSession.files.every(f => f.selected !== false)}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs text-gray-500">เลือกทั้งหมด</span>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2 min-h-[100px]">
@@ -1317,12 +1348,20 @@ const AiNotebook = () => {
               </div>
             ) : (
               activeSession.files.map((f, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group">
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <FileText size={16} className="text-gray-500 flex-shrink-0" />
-                    <span className="truncate text-sm text-gray-700">{f.name}</span>
+                <div key={i} className={`flex items-center justify-between p-3 rounded-lg border group transition-colors ${f.selected !== false ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200 opacity-75'}`}>
+                  <div className="flex items-center gap-3 overflow-hidden flex-1">
+                    <input
+                      type="checkbox"
+                      checked={f.selected !== false}
+                      onChange={() => toggleFileSelection(i)}
+                      className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0"
+                    />
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FileText size={16} className={f.selected !== false ? "text-indigo-500" : "text-gray-400"} />
+                      <span className={`truncate text-sm ${f.selected !== false ? "text-indigo-900 font-medium" : "text-gray-500"}`}>{f.name}</span>
+                    </div>
                   </div>
-                  <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
                     <Trash2 size={16} />
                   </button>
                 </div>
