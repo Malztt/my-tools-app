@@ -1068,9 +1068,6 @@ const PdfMerger = () => {
   );
 };
 
-  );
-};
-
 // --- Markmap Component ---
 const transformer = new Transformer();
 
