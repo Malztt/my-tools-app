@@ -54,7 +54,6 @@ const UrlShortener = () => {
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์ (ใช้งานจริง)</h2>
-        <p className="text-gray-500">ใช้บริการผ่าน TinyURL API</p>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -139,7 +138,6 @@ const ImageCompressor = () => {
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-gray-800">บีบอัดรูปภาพ</h2>
-        <p className="text-gray-500">ทำงานบน Browser 100% ไม่ต้องอัปโหลดขึ้นเซิร์ฟเวอร์</p>
       </div>
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         {!originalImage ? (
@@ -175,63 +173,73 @@ const ImageCompressor = () => {
   );
 };
 
-// 3. PDF Optimizer (Using pdf-lib for real file processing)
+// 3. PDF Optimizer (Rasterize Pages to Images)
 const PdfOptimizer = () => {
   const [file, setFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedPdf, setProcessedPdf] = useState(null);
-  const [libLoaded, setLibLoaded] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-
-  useEffect(() => {
-    // Dynamic import to avoid SSR issues if used in frameworks like Next.js, but works fine in Vite
-    import('pdf-lib').then(() => {
-      setLibLoaded(true);
-    }).catch(err => {
-      // Fallback for CDN if local install fails (safety net)
-      if (window.PDFLib) {
-        setLibLoaded(true);
-      } else {
-        const script = document.createElement('script');
-        script.src = "https://unpkg.com/pdf-lib/dist/pdf-lib.min.js";
-        script.onload = () => setLibLoaded(true);
-        document.body.appendChild(script);
-      }
-    });
-  }, []);
+  const [progress, setProgress] = useState(0);
 
   const handleFileChange = (e) => {
     if (e.target.files[0]) {
       setFile(e.target.files[0]);
       setProcessedPdf(null);
       setStatusMsg('');
+      setProgress(0);
     }
   };
 
   const processPdf = async () => {
     if (!file) return;
     setIsProcessing(true);
-    setStatusMsg('กำลังอ่านไฟล์...');
+    setStatusMsg('กำลังเตรียมการ...');
+    setProgress(0);
 
     try {
-      // Get PDFLib from window (CDN) or imported module
-      const PDFLib = window.PDFLib || await import('pdf-lib');
+      // Import libraries dynamically
+      const PDFLib = await import('pdf-lib');
+      const pdfjs = await import('pdfjs-dist');
+
+      // Set worker source (using CDN for simplicity and reliability)
+      pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
       const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+      const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
 
-      setStatusMsg('กำลังปรับปรุงโครงสร้าง PDF...');
+      const newPdfDoc = await PDFLib.PDFDocument.create();
 
-      // Real processing: Strip metadata to save space (Lite Optimization)
-      pdfDoc.setTitle('');
-      pdfDoc.setAuthor('');
-      pdfDoc.setSubject('');
-      pdfDoc.setKeywords([]);
-      pdfDoc.setProducer('');
-      pdfDoc.setCreator('');
+      for (let i = 1; i <= numPages; i++) {
+        setStatusMsg(`กำลังแปลงหน้า ${i} จาก ${numPages}...`);
+        setProgress(Math.round((i / numPages) * 100));
 
-      // Save logic
-      const pdfBytes = await pdfDoc.save();
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1.5 }); // Scale 1.5 for decent quality but smaller size
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+        // Convert to JPEG with 0.7 quality
+        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
+
+        const jpgImage = await newPdfDoc.embedJpg(imgBytes);
+        const newPage = newPdfDoc.addPage([jpgImage.width, jpgImage.height]);
+        newPage.drawImage(jpgImage, {
+          x: 0,
+          y: 0,
+          width: jpgImage.width,
+          height: jpgImage.height,
+        });
+      }
+
+      setStatusMsg('กำลังรวมไฟล์ PDF...');
+      const pdfBytes = await newPdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
 
@@ -253,7 +261,6 @@ const PdfOptimizer = () => {
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-gray-800">จัดการไฟล์ PDF</h2>
-        <p className="text-gray-500">Clean Metadata & Re-save (ประมวลผลจริงบนเครื่อง)</p>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -277,15 +284,15 @@ const PdfOptimizer = () => {
             {!processedPdf ? (
               <div className="space-y-3">
                 <button onClick={processPdf} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-red-200 flex justify-center items-center gap-2">
-                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Zap size={20} /><span>เริ่มประมวลผล</span></>}
+                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg} ({progress}%)</span></> : <><Zap size={20} /><span>เริ่มบีบอัด (แปลงเป็นภาพ)</span></>}
                 </button>
-                <p className="text-xs text-gray-400 text-center">การทำงาน: ระบบจะทำการโหลดไฟล์และลบข้อมูล Metadata ที่ไม่จำเป็นออก เพื่อลดขนาดไฟล์เบื้องต้น</p>
+                <p className="text-xs text-gray-400 text-center">ระบบจะแปลงทุกหน้าเป็นรูปภาพเพื่อลดขนาดไฟล์ (ข้อความจะไม่สามารถค้นหาได้)</p>
               </div>
             ) : (
               <div className="space-y-4 animate-fade-in">
                 <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex flex-col gap-1 text-green-700">
                   <div className="flex items-center gap-2 font-bold"><Check size={20} /> <span>เรียบร้อย!</span></div>
-                  <div className="text-sm ml-7">ขนาดใหม่: {formatSize(processedPdf.size)}</div>
+                  <div className="text-sm ml-7">ขนาดใหม่: {formatSize(processedPdf.size)} <span className="bg-green-200 px-2 rounded-full">-{Math.round(((file.size - processedPdf.size) / file.size) * 100)}%</span></div>
                 </div>
                 <a href={processedPdf.url} download={`optimized-${file.name}`} className="w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all flex justify-center items-center gap-2">
                   <Download size={20} /> ดาวน์โหลดไฟล์ใหม่
@@ -396,7 +403,7 @@ const GeminiOCR = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2"><h2 className="text-2xl font-bold text-gray-800">Gemini OCR (AI)</h2><p className="text-gray-500">รองรับรูปภาพ และ PDF</p></div>
+      <div className="text-center space-y-2"><h2 className="text-2xl font-bold text-gray-800">Gemini OCR (AI)</h2></div>
       <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex gap-4 items-center">
         <Key size={20} className="text-blue-700" />
         <div className="relative flex-1">
