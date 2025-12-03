@@ -496,10 +496,10 @@ const GeminiOCR = () => {
     <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2"><h2 className="text-2xl font-bold text-gray-800">Gemini OCR (AI)</h2></div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div onClick={() => !image && fileInputRef.current.click()} className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center min-h-[250px] ${!image ? 'cursor-pointer hover:bg-gray-50' : ''}`}>
+      <div className="space-y-6">
+        <div onClick={() => !image && fileInputRef.current.click()} className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center min-h-[200px] ${!image ? 'cursor-pointer hover:bg-gray-50' : ''}`}>
           {!image ? <><FileText size={48} className="text-indigo-300 mb-4" /><p>อัปโหลด รูปภาพ หรือ PDF</p><input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleFileUpload} className="hidden" /></> :
-            <div className="w-full space-y-4">
+            <div className="w-full max-w-md mx-auto space-y-4">
               <div className="relative h-48 bg-gray-900 rounded-xl overflow-hidden flex justify-center items-center">
                 {mimeType === 'application/pdf' ? (
                   <div className="text-white flex flex-col items-center">
@@ -515,9 +515,10 @@ const GeminiOCR = () => {
             </div>
           }
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 min-h-[250px] flex flex-col">
-          <div className="flex justify-between mb-4"><h3 className="font-medium text-gray-700">ผลลัพธ์</h3><button onClick={() => navigator.clipboard.writeText(text)} disabled={!text} className="text-indigo-600 text-sm flex gap-1"><Copy size={16} /> คัดลอก</button></div>
-          {error ? <div className="text-red-500 text-center mt-10"><AlertCircle size={32} className="mx-auto mb-2" />{error}</div> : <textarea readOnly value={text} placeholder="..." className="flex-1 w-full p-4 bg-gray-50 rounded-xl border-gray-200 resize-none" />}
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col">
+          <div className="flex justify-between mb-4"><h3 className="font-medium text-gray-700">ผลลัพธ์ข้อความ</h3><button onClick={() => navigator.clipboard.writeText(text)} disabled={!text} className="text-indigo-600 text-sm flex gap-1"><Copy size={16} /> คัดลอก</button></div>
+          {error ? <div className="text-red-500 text-center mt-10"><AlertCircle size={32} className="mx-auto mb-2" />{error}</div> : <textarea readOnly value={text} placeholder="ข้อความที่ดึงได้จะปรากฏที่นี่..." className="w-full p-4 bg-gray-50 rounded-xl border-gray-200 resize-none min-h-[300px] text-base leading-relaxed" />}
         </div>
       </div>
     </div>
@@ -1004,8 +1005,8 @@ const App = () => {
                       key={tool.id}
                       onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
                       className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
-                          ? 'bg-indigo-50 text-indigo-600 shadow-sm'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                         }`}
                     >
                       <tool.icon size={20} />
