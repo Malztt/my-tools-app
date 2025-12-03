@@ -1412,7 +1412,9 @@ const AiNotebook = () => {
     try {
       // Construct context from SELECTED files only
       const selectedFiles = activeSession.files.filter(f => f.selected !== false); // Default to true if undefined
+      console.log("Debug: Selected Files:", selectedFiles.map(f => ({ name: f.name, contentLength: f.content?.length })));
       const context = selectedFiles.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
+      console.log("Debug: Context Length:", context.length);
 
       if (!context) {
         setMessages(prev => [...prev, { role: 'ai', text: 'กรุณาเลือกเอกสารอย่างน้อย 1 ไฟล์เพื่อใช้เป็นข้อมูลอ้างอิง' }]);
@@ -1454,7 +1456,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.10</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.11</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
