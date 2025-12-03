@@ -1131,10 +1131,17 @@ const AiNotebook = () => {
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
 
+  // Ensure activeSessionId is always valid
+  useEffect(() => {
+    if (sessions.length > 0 && !sessions.find(s => s.id === activeSessionId)) {
+      setActiveSessionId(sessions[0].id);
+    }
+  }, [sessions, activeSessionId]);
+
   // Derived state setters (helpers to update active session)
   const setFiles = (newFiles) => {
     setSessions(prev => prev.map(s => {
-      if (s.id === activeSessionId) {
+      if (s.id === activeSession.id) {
         const updatedFiles = typeof newFiles === 'function' ? newFiles(s.files) : newFiles;
         return { ...s, files: updatedFiles };
       }
@@ -1144,7 +1151,7 @@ const AiNotebook = () => {
 
   const setMessages = (newMessages) => {
     setSessions(prev => prev.map(s => {
-      if (s.id === activeSessionId) {
+      if (s.id === activeSession.id) {
         const updatedMessages = typeof newMessages === 'function' ? newMessages(s.messages) : newMessages;
         // Auto-update title based on first user message if it's "New Chat"
         let newTitle = s.title;
@@ -1161,8 +1168,8 @@ const AiNotebook = () => {
   // Persist to LocalStorage
   useEffect(() => {
     localStorage.setItem('ai_notebook_sessions', JSON.stringify(sessions));
-    localStorage.setItem('ai_notebook_active_session', activeSessionId);
-  }, [sessions, activeSessionId]);
+    localStorage.setItem('ai_notebook_active_session', activeSession.id);
+  }, [sessions, activeSession.id]);
 
   const createNewChat = () => {
     const newSession = { id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() };
