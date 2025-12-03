@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
-  Key, Eye, EyeOff, AlertCircle, Search
+  Key, Eye, EyeOff, AlertCircle, Search, ExternalLink
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -433,21 +433,30 @@ const GeminiOCR = () => {
   );
 };
 
-// 6. OCSC Accreditation Search (Iframe)
+// 6. OCSC Accreditation Search (External Link)
 const OcscSearch = () => {
   return (
-    <div className="w-full h-full flex flex-col animate-fade-in">
-      <div className="text-center space-y-2 mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">ค้นหาหลักสูตร (ก.พ.)</h2>
-        <p className="text-gray-500 text-sm">ระบบรับรองคุณวุฒิ สำนักงาน ก.พ.</p>
-      </div>
-      <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
-        <iframe
-          src="https://accreditation.ocsc.go.th/accreditation/search/curriculum"
-          className="w-full h-full border-0"
-          title="OCSC Search"
-          sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-        />
+    <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6">
+      <div className="text-center space-y-6 max-w-lg">
+        <div className="bg-indigo-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto text-indigo-600 mb-6">
+          <Search size={48} />
+        </div>
+        <div className="space-y-3">
+          <h2 className="text-2xl font-bold text-gray-800">ค้นหาหลักสูตร (ก.พ.)</h2>
+          <p className="text-gray-500 leading-relaxed">
+            เนื่องจากระบบความปลอดภัยของเว็บไซต์ ก.พ. (Security Policy) <br />
+            ไม่อนุญาตให้แสดงผลผ่านแอพอื่นโดยตรง
+          </p>
+        </div>
+        <a
+          href="https://accreditation.ocsc.go.th/accreditation/search/curriculum"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-4 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 hover:scale-105 transform duration-200"
+        >
+          <ExternalLink size={20} />
+          <span>เปิดหน้าค้นหาในแท็บใหม่</span>
+        </a>
       </div>
     </div>
   );
