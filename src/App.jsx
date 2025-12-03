@@ -10,7 +10,8 @@ import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
-  FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical
+  FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical,
+  NotebookPen, MessageSquare, Send, Trash2
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -476,7 +477,7 @@ const GeminiOCR = () => {
     setLoading(true); setError(''); setText('');
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1082,6 +1083,7 @@ const App = () => {
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode, category: 'เครื่องมือทั่วไป' },
     { id: 'shorten', label: 'ย่อลิงก์', icon: Link, category: 'เครื่องมือทั่วไป' },
     { id: 'ocsc', label: 'ระบบรับรองคุณวุฒิ ก.พ.', icon: Search, category: 'เครื่องมือทั่วไป' },
+    { id: 'ai_notebook', label: 'สมุดโน้ต AI', icon: NotebookPen, category: 'เครื่องมือทั่วไป' },
   ];
 
   return (
@@ -1129,6 +1131,7 @@ const App = () => {
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
+            {activeTab === 'ai_notebook' && <AiNotebook />}
           </div>
         </div>
       </main>
