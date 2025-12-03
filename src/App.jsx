@@ -1291,20 +1291,28 @@ const AiNotebook = () => {
     }
   };
 
+  const [showSources, setShowSources] = useState(true);
+  const [showStudio, setShowStudio] = useState(true);
+
   return (
-    <div className="max-w-[1800px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans">
+    <div className="max-w-[1800px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans relative">
       {/* Left Sidebar: Sources */}
-      <div className="w-full md:w-[300px] flex flex-col gap-4 flex-shrink-0">
+      <div className={`${showSources ? 'w-full md:w-[300px]' : 'w-0 opacity-0 overflow-hidden p-0'} transition-all duration-300 ease-in-out flex flex-col gap-4 flex-shrink-0`}>
         {/* Header / New Chat */}
-        <div className="flex items-center justify-between px-2">
+        <div className="flex items-center justify-between px-2 min-w-[300px]">
           <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-          <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
-            <MessageSquare size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
+              <MessageSquare size={20} />
+            </button>
+            <button onClick={() => setShowSources(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900 md:hidden" title="Close Sidebar">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Sources Panel */}
-        <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
+        <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm min-w-[300px]">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-white">
             <span className="font-medium text-gray-700">Sources</span>
             <div className="flex items-center gap-2">
@@ -1365,7 +1373,7 @@ const AiNotebook = () => {
         </div>
 
         {/* Session History (Mini) */}
-        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm max-h-[200px] overflow-y-auto">
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm max-h-[200px] overflow-y-auto min-w-[300px]">
           <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wider">Recent Chats</h3>
           <div className="space-y-1">
             {sessions.map(session => (
@@ -1387,12 +1395,24 @@ const AiNotebook = () => {
       </div>
 
       {/* Center Content: Chat */}
-      <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm relative">
+      <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm relative transition-all duration-300">
         <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {!showSources && (
+              <button onClick={() => setShowSources(true)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors" title="Show Sources">
+                <PanelLeftOpen size={20} />
+              </button>
+            )}
             <span className="font-medium text-gray-900">{activeSession.title}</span>
           </div>
-          <button onClick={() => setMessages([])} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Clear Chat</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMessages([])} className="text-xs text-gray-400 hover:text-red-500 transition-colors mr-2">Clear Chat</button>
+            {!showStudio && (
+              <button onClick={() => setShowStudio(true)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors" title="Show Studio">
+                <PanelRightOpen size={20} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white">
@@ -1458,11 +1478,14 @@ const AiNotebook = () => {
       </div>
 
       {/* Right Sidebar: Studio */}
-      <div className="w-full md:w-[300px] flex flex-col gap-4 flex-shrink-0">
-        <div className="p-2">
+      <div className={`${showStudio ? 'w-full md:w-[300px]' : 'w-0 opacity-0 overflow-hidden p-0'} transition-all duration-300 ease-in-out flex flex-col gap-4 flex-shrink-0`}>
+        <div className="p-2 flex items-center justify-between min-w-[300px]">
           <h2 className="text-xl font-medium text-gray-700">Studio</h2>
+          <button onClick={() => setShowStudio(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="Close Studio">
+            <PanelRightClose size={20} />
+          </button>
         </div>
-        <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 overflow-y-auto">
+        <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 overflow-y-auto min-w-[300px]">
           <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
             <p className="text-xs text-indigo-800 font-medium mb-1">✨ AI Studio</p>
             <p className="text-[10px] text-indigo-600">Generate different formats from your sources.</p>
