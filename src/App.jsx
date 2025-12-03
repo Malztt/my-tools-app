@@ -13,7 +13,8 @@ import {
   FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical,
   NotebookPen, MessageSquare, Send, Trash2, Maximize2
 } from 'lucide-react';
-import mermaid from 'mermaid';
+import { Transformer } from 'markmap-lib';
+import { Markmap } from 'markmap-view';
 
 // --- Helper Functions ---
 const formatSize = (bytes) => {
@@ -1067,29 +1068,35 @@ const PdfMerger = () => {
   );
 };
 
-// --- Mermaid Diagram Component ---
-const MermaidDiagram = ({ code }) => {
-  const [svg, setSvg] = useState('');
-  const [error, setError] = useState(null);
-  const id = useMemo(() => `mermaid-${Math.random().toString(36).substr(2, 9)}`, []);
+  );
+};
+
+// --- Markmap Component ---
+const transformer = new Transformer();
+
+const MarkmapView = ({ markdown }) => {
+  const svgRef = useRef(null);
+  const mmRef = useRef(null);
 
   useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme: 'default' });
-    const renderDiagram = async () => {
-      try {
-        const { svg } = await mermaid.render(id, code);
-        setSvg(svg);
-        setError(null);
-      } catch (err) {
-        console.error('Mermaid render error:', err);
-        setError('ไม่สามารถแสดงแผนผังได้ (รูปแบบข้อมูลไม่ถูกต้อง)');
+    if (svgRef.current && markdown) {
+      if (!mmRef.current) {
+        mmRef.current = Markmap.create(svgRef.current);
       }
-    };
-    renderDiagram();
-  }, [code, id]);
+      const { root } = transformer.transform(markdown);
+      mmRef.current.setData(root);
+      mmRef.current.fit();
+    }
+  }, [markdown]);
 
-  if (error) return <div className="text-red-500 text-xs p-2 bg-red-50 rounded">{error}</div>;
-  return <div className="mermaid-container overflow-x-auto p-4 bg-white rounded-lg border border-gray-200 my-2" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return (
+    <div className="w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200 overflow-hidden my-2 relative group">
+      <svg ref={svgRef} className="w-full h-full" />
+      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none">
+        Zoom/Pan enabled
+      </div>
+    </div>
+  );
 };
 
 // 10. AI Notebook (Chat with Documents)
@@ -1333,7 +1340,7 @@ const AiNotebook = () => {
               <div className="grid grid-cols-2 gap-3 w-full max-w-md px-4">
                 {[
                   { label: '📝 สรุปเนื้อหา', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-                  { label: '🧠 แผนผังความคิด', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Mermaid.js syntax (graph TD) **สำคัญ: ต้องใส่เครื่องหมายคำพูดครอบข้อความใน Node เสมอ** เช่น A["หัวข้อหลัก"] --> B["หัวข้อย่อย"] เพื่อป้องกัน Error' },
+                  { label: '🧠 แผนผังความคิด', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Markdown Format (ใช้ - สำหรับหัวข้อ) ใส่ใน code block ```markmap ... ```' },
                   { label: '🔑 ประเด็นสำคัญ', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
                   { label: '❓ ตั้งคำถามทดสอบ', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
                 ].map((item, i) => (
@@ -1351,10 +1358,10 @@ const AiNotebook = () => {
           {activeSession.messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}`}>
-                {msg.text.includes('```mermaid') ? (
+                {msg.text.includes('```markmap') ? (
                   <div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed mb-2">{msg.text.split('```mermaid')[0]}</p>
-                    <MermaidDiagram code={msg.text.split('```mermaid')[1].split('```')[0].trim()} />
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed mb-2">{msg.text.split('```markmap')[0]}</p>
+                    <MarkmapView markdown={msg.text.split('```markmap')[1].split('```')[0].trim()} />
                     <p className="whitespace-pre-wrap text-sm leading-relaxed mt-2">{msg.text.split('```')[2]}</p>
                   </div>
                 ) : (
