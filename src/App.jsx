@@ -347,7 +347,7 @@ const QRCodeGenerator = () => {
 
 // 5. Gemini OCR (Real API + PDF Support)
 const GeminiOCR = () => {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
+  const [apiKey, setApiKey] = useState('AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk');
   const [showKey, setShowKey] = useState(false);
   const [image, setImage] = useState(null);
   const [mimeType, setMimeType] = useState('');
@@ -379,7 +379,7 @@ const GeminiOCR = () => {
     setLoading(true); setError(''); setText('');
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
