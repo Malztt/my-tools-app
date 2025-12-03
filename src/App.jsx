@@ -3,7 +3,7 @@ import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
-  FileSpreadsheet, Images as ImageIcon, FileType2
+  FileSpreadsheet, Images as ImageIcon, FileType2, Files
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -470,12 +470,14 @@ const PdfConverter = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [result, setResult] = useState(null);
+  const [selectedPages, setSelectedPages] = useState([]);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       setFiles(Array.from(e.target.files));
       setResult(null);
       setStatusMsg('');
+      setSelectedPages([]);
     }
   };
 
@@ -507,6 +509,7 @@ const PdfConverter = () => {
       }
 
       setResult({ type: 'images', data: images });
+      setSelectedPages(images.map((_, i) => i)); // Select all by default
       setStatusMsg('เสร็จสิ้น!');
     } catch (err) {
       console.error(err);
@@ -561,6 +564,28 @@ const PdfConverter = () => {
     }
   };
 
+  const togglePageSelection = (index) => {
+    setSelectedPages(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
+  };
+
+  const downloadZip = async () => {
+    if (!result || result.type !== 'images') return;
+    const JSZip = (await import('jszip')).default;
+    const saveAs = (await import('file-saver')).saveAs;
+    const zip = new JSZip();
+
+    selectedPages.forEach(index => {
+      const imgData = result.data[index];
+      const base64Data = imgData.replace(/^data:image\/(png|jpeg);base64,/, "");
+      zip.file(`page-${index + 1}.jpg`, base64Data, { base64: true });
+    });
+
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, "selected-pages.zip");
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
@@ -607,13 +632,28 @@ const PdfConverter = () => {
               {result.type === 'pdf' ? (
                 <a href={result.url} download="converted.pdf" className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลด PDF</a>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  {result.data.map((img, idx) => (
-                    <a key={idx} href={img} download={`page-${idx + 1}.jpg`} className="block">
-                      <img src={img} alt={`Page ${idx + 1}`} className="w-full rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
-                      <div className="text-center text-xs mt-1 text-gray-500">ดาวน์โหลดหน้า {idx + 1}</div>
-                    </a>
-                  ))}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">เลือก {selectedPages.length} จาก {result.data.length} รูป</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setSelectedPages(result.data.map((_, i) => i))} className="text-xs text-indigo-600 hover:underline">เลือกทั้งหมด</button>
+                      <button onClick={() => setSelectedPages([])} className="text-xs text-gray-500 hover:underline">ไม่เลือกเลย</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {result.data.map((img, idx) => (
+                      <div key={idx} className={`relative group cursor-pointer border-2 rounded-lg overflow-hidden ${selectedPages.includes(idx) ? 'border-indigo-500' : 'border-transparent'}`} onClick={() => togglePageSelection(idx)}>
+                        <img src={img} alt={`Page ${idx + 1}`} className="w-full h-auto" />
+                        <div className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center ${selectedPages.includes(idx) ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-transparent border border-gray-400'}`}>
+                          <Check size={14} />
+                        </div>
+                        <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs text-center py-1">หน้า {idx + 1}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={downloadZip} disabled={selectedPages.length === 0} className="w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all flex justify-center items-center gap-2 disabled:opacity-50">
+                    <Download size={20} /> ดาวน์โหลดที่เลือก (ZIP)
+                  </button>
                 </div>
               )}
             </div>
@@ -735,6 +775,108 @@ const ExcelConverter = () => {
   );
 };
 
+// 9. PDF Merger (Merge Multiple PDFs)
+const PdfMerger = () => {
+  const [files, setFiles] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [resultPdf, setResultPdf] = useState(null);
+
+  const handleFileChange = (e) => {
+    if (e.target.files) {
+      setFiles(prev => [...prev, ...Array.from(e.target.files)]);
+      setResultPdf(null);
+    }
+  };
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const mergePdfs = async () => {
+    if (files.length < 2) {
+      setStatusMsg('กรุณาเลือกไฟล์ PDF อย่างน้อย 2 ไฟล์');
+      return;
+    }
+    setIsProcessing(true);
+    setStatusMsg('กำลังรวมไฟล์...');
+
+    try {
+      const PDFLib = await import('pdf-lib');
+      const mergedPdf = await PDFLib.PDFDocument.create();
+
+      for (const file of files) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+        const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+
+      const pdfBytes = await mergedPdf.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      setResultPdf(url);
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-bold text-gray-800">รวมไฟล์ PDF (Merge)</h2>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="space-y-6">
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+            <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div className="bg-red-100 text-red-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><Files size={32} /></div>
+            <p className="font-medium text-gray-700">เพิ่มไฟล์ PDF (เลือกได้หลายไฟล์)</p>
+          </div>
+
+          {files.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-gray-700">รายการไฟล์ ({files.length})</p>
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                {files.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="truncate text-sm text-gray-600">{i + 1}. {f.name}</span>
+                    <button onClick={() => removeFile(i)} className="text-red-400 hover:text-red-600"><X size={16} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={mergePdfs}
+            disabled={isProcessing || files.length < 2}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>รวมไฟล์ PDF</span></>}
+          </button>
+          {statusMsg && <p className="text-center text-sm text-gray-500">{statusMsg}</p>}
+
+          {resultPdf && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
+                <Check size={20} /> <span>เรียบร้อย!</span>
+              </div>
+              <a href={resultPdf} download="merged.pdf" className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลดไฟล์ที่รวมแล้ว</a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
@@ -743,6 +885,7 @@ const App = () => {
     { id: 'ocr', label: 'Gemini OCR', icon: Zap },
     { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search },
     { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
+    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link },
     { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
@@ -770,6 +913,7 @@ const App = () => {
             {activeTab === 'ocr' && <GeminiOCR />}
             {activeTab === 'ocsc' && <OcscSearch />}
             {activeTab === 'pdf_conv' && <PdfConverter />}
+            {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
           </div>
         </div>
