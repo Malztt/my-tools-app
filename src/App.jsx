@@ -1174,9 +1174,10 @@ const MarkmapView = ({ markdown }) => {
 
   useEffect(() => {
     if (svgRef.current && markdown) {
+      // Clear existing instance if needed (optional, but safer to reuse)
       if (!mmRef.current) {
         mmRef.current = Markmap.create(svgRef.current, {
-          color: ['#a5b4fc', '#818cf8', '#6366f1'], // Indigo shades
+          color: ['#a5b4fc', '#818cf8', '#6366f1'],
           initialExpandLevel: 2,
           maxWidth: 300,
           spacingVertical: 15,
@@ -1188,9 +1189,22 @@ const MarkmapView = ({ markdown }) => {
       }
       try {
         const { root } = transformer.transform(markdown);
-        if (!root) return;
+        if (!root) {
+          console.error("Markmap: Root is null");
+          return;
+        }
+
         mmRef.current.setData(root);
-        setTimeout(() => mmRef.current.fit(), 200);
+
+        // Debug dimensions
+        const rect = svgRef.current.getBoundingClientRect();
+        console.log("Markmap SVG Dimensions:", rect.width, rect.height);
+
+        // Ensure fit runs after layout
+        requestAnimationFrame(() => {
+          if (mmRef.current) mmRef.current.fit();
+        });
+
       } catch (e) {
         console.error("Markmap render error:", e);
       }
@@ -1202,7 +1216,9 @@ const MarkmapView = ({ markdown }) => {
     if (!mmRef.current || !svgRef.current) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      mmRef.current.fit();
+      requestAnimationFrame(() => {
+        if (mmRef.current) mmRef.current.fit();
+      });
     });
 
     resizeObserver.observe(svgRef.current.parentNode);
@@ -1215,30 +1231,19 @@ const MarkmapView = ({ markdown }) => {
       <div className="absolute top-4 right-4 z-10 flex gap-2">
         {isFullscreen ? (
           <button onClick={() => setIsFullscreen(false)} className="p-2 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 text-white shadow-sm border border-white/10 transition-colors">
-            <X size={24} />
+            <Minimize2 size={18} />
           </button>
         ) : (
-          <button onClick={() => setIsFullscreen(true)} className="p-2 bg-black/20 backdrop-blur-md rounded-full hover:bg-black/40 text-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity border border-white/10">
-            <Maximize2 size={20} />
+          <button onClick={() => setIsFullscreen(true)} className="p-2 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 text-white shadow-sm border border-white/10 transition-colors opacity-0 group-hover:opacity-100">
+            <Maximize2 size={18} />
           </button>
         )}
       </div>
-      {/* Custom CSS for Markmap Nodes to look like cards */}
-      <style>{`
-        .markmap-node-text { fill: #e2e8f0 !important; font-family: 'Inter', sans-serif; }
-        .markmap-link { stroke: #6366f1 !important; stroke-width: 2px; }
-        .markmap-node-circle { fill: #6366f1 !important; stroke: #fff !important; }
-        svg { background: transparent !important; }
-      `}</style>
-      <svg ref={svgRef} className="w-full h-full" />
-      {!isFullscreen && (
-        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none bg-black/50 px-2 py-1 rounded backdrop-blur-sm">
-          Zoom/Pan enabled
-        </div>
-      )}
+      <svg ref={svgRef} className="w-full h-full block" />
     </div>
   );
 };
+
 
 // 10. AI Notebook (Chat with Documents)
 const AiNotebook = () => {
@@ -1414,7 +1419,8 @@ const AiNotebook = () => {
       const selectedFiles = activeSession.files.filter(f => f.selected !== false); // Default to true if undefined
       console.log("Debug: Selected Files:", selectedFiles.map(f => ({ name: f.name, contentLength: f.content?.length })));
       const context = selectedFiles.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
-      console.log("Debug: Context Length:", context.length);
+      const truncatedContext = context.length > 25000 ? context.substring(0, 25000) + "\n...[Content Truncated]..." : context;
+      console.log("Debug: Context Length:", truncatedContext.length);
 
       if (!context) {
         setMessages(prev => [...prev, { role: 'ai', text: 'กรุณาเลือกเอกสารอย่างน้อย 1 ไฟล์เพื่อใช้เป็นข้อมูลอ้างอิง' }]);
@@ -1422,7 +1428,7 @@ const AiNotebook = () => {
         return;
       }
 
-      const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
+      const prompt = `Context from uploaded documents:\n${truncatedContext}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
@@ -1456,7 +1462,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.11</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.12</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
