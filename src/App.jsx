@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 // Set worker source globally
@@ -15,6 +18,8 @@ import {
 } from 'lucide-react';
 import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // --- Helper Functions ---
 const formatSize = (bytes) => {
@@ -1450,12 +1455,18 @@ const AiNotebook = () => {
                 {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-600 mb-1">AI Answer</div>}
                 {msg.text.includes('```markmap') ? (
                   <div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed mb-2">{msg.text.split('```markmap')[0]}</p>
+                    <ReactMarkdown className="prose prose-sm max-w-none mb-2" remarkPlugins={[remarkGfm]}>
+                      {msg.text.split('```markmap')[0]}
+                    </ReactMarkdown>
                     <MarkmapView markdown={msg.text.split('```markmap')[1].split('```')[0].trim()} />
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed mt-2">{msg.text.split('```')[2]}</p>
+                    <ReactMarkdown className="prose prose-sm max-w-none mt-2" remarkPlugins={[remarkGfm]}>
+                      {msg.text.split('```')[2]}
+                    </ReactMarkdown>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
+                  <ReactMarkdown className="prose prose-sm max-w-none" remarkPlugins={[remarkGfm]}>
+                    {msg.text}
+                  </ReactMarkdown>
                 )}
               </div>
             </div>
