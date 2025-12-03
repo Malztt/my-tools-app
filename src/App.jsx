@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
 import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
@@ -336,40 +337,100 @@ const PdfOptimizer = () => {
   );
 };
 
-// 4. QR Code Generator (Real API)
+// 4. QR Code Generator (with Logo)
 const QRCodeGenerator = () => {
-  const [text, setText] = useState('');
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(text)}`;
+  const [text, setText] = useState('https://example.com');
+  const [logo, setLogo] = useState(null);
+  const [logoSize, setLogoSize] = useState(60); // Default logo size
+  const qrRef = useRef(null);
 
-  const downloadQR = async () => {
-    try {
-      const response = await fetch(qrUrl);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setLogo(e.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const downloadQR = () => {
+    const canvas = qrRef.current.querySelector('canvas');
+    if (canvas) {
+      const url = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'qrcode.png';
+      link.download = 'qrcode-with-logo.png';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (error) {
-      alert('คลิกขวาที่รูปภาพเพื่อบันทึก');
     }
   };
 
   return (
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">สร้าง QR Code</h2>
+        <h2 className="text-2xl font-bold text-gray-800">สร้าง QR Code (ใส่โลโก้ได้)</h2>
       </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <textarea rows="3" value={text} onChange={(e) => setText(e.target.value)} placeholder="กรอกข้อความที่นี่..." className="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-200 outline-none resize-none" />
-        {text && (
-          <div className="flex flex-col items-center space-y-6 pt-4 animate-fade-in">
-            <div className="p-4 bg-white border-2 border-indigo-100 rounded-xl shadow-sm"><img src={qrUrl} alt="QR" className="w-48 h-48 object-contain" /></div>
-            <button onClick={downloadQR} className="w-full bg-indigo-600 text-white py-3 rounded-xl flex justify-center items-center gap-2"><Download size={20} /> บันทึก QR Code</button>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">ข้อความ / ลิงก์</label>
+          <textarea
+            rows="2"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="กรอกข้อความที่นี่..."
+            className="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-200 outline-none resize-none"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">โลโก้ตรงกลาง (ถ้ามี)</label>
+          <div className="flex items-center gap-4">
+            <div className="relative overflow-hidden bg-gray-50 border border-gray-200 rounded-lg w-full">
+              <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+              <div className="p-3 text-center text-sm text-gray-500 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2">
+                <Upload size={16} /> {logo ? 'เปลี่ยนรูปโลโก้' : 'อัปโหลดรูปโลโก้'}
+              </div>
+            </div>
+            {logo && <button onClick={() => setLogo(null)} className="text-red-500 hover:text-red-700 p-2"><X size={20} /></button>}
+          </div>
+        </div>
+
+        {logo && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">ขนาดโลโก้: {logoSize}px</label>
+            <input
+              type="range"
+              min="20"
+              max="100"
+              value={logoSize}
+              onChange={(e) => setLogoSize(Number(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+            />
           </div>
         )}
+
+        <div className="flex flex-col items-center space-y-6 pt-4 border-t border-gray-100">
+          <div ref={qrRef} className="p-4 bg-white border-2 border-indigo-100 rounded-xl shadow-sm">
+            <QRCodeCanvas
+              value={text}
+              size={256}
+              level={"H"} // High error correction for logos
+              imageSettings={logo ? {
+                src: logo,
+                x: undefined,
+                y: undefined,
+                height: logoSize,
+                width: logoSize,
+                excavate: true,
+              } : undefined}
+            />
+          </div>
+          <button onClick={downloadQR} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl flex justify-center items-center gap-2 transition-all shadow-lg shadow-indigo-200">
+            <Download size={20} /> บันทึก QR Code
+          </button>
+        </div>
       </div>
     </div>
   );
