@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 // Set worker source globally
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -9,7 +10,7 @@ import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
-  FileSpreadsheet, Images as ImageIcon, FileType2, Files
+  FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -889,6 +890,14 @@ const PdfMerger = () => {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const onDragEnd = (result) => {
+    if (!result.destination) return;
+    const items = Array.from(files);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+    setFiles(items);
+  };
+
   const mergePdfs = async () => {
     if (files.length < 2) {
       setStatusMsg('กรุณาเลือกไฟล์ PDF อย่างน้อย 2 ไฟล์');
@@ -938,15 +947,35 @@ const PdfMerger = () => {
 
           {files.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-700">รายการไฟล์ ({files.length})</p>
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                {files.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <span className="truncate text-sm text-gray-600">{i + 1}. {f.name}</span>
-                    <button onClick={() => removeFile(i)} className="text-red-400 hover:text-red-600"><X size={16} /></button>
-                  </div>
-                ))}
-              </div>
+              <p className="text-sm font-medium text-gray-700">รายการไฟล์ ({files.length}) - ลากเพื่อจัดลำดับ</p>
+              <DragDropContext onDragEnd={onDragEnd}>
+                <Droppable droppableId="pdf-list">
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                      {files.map((f, i) => (
+                        <Draggable key={`${f.name}-${i}`} draggableId={`${f.name}-${i}`} index={i}>
+                          {(provided) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group"
+                            >
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                <div {...provided.dragHandleProps} className="text-gray-400 cursor-grab hover:text-gray-600">
+                                  <GripVertical size={16} />
+                                </div>
+                                <span className="truncate text-sm text-gray-600">{i + 1}. {f.name}</span>
+                              </div>
+                              <button onClick={() => removeFile(i)} className="text-red-400 hover:text-red-600"><X size={16} /></button>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
             </div>
           )}
 
