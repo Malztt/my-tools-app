@@ -1456,7 +1456,10 @@ const AiNotebook = () => {
       <div className={`${showSources ? 'w-full md:w-[300px]' : 'w-0 opacity-0 overflow-hidden p-0'} transition-all duration-300 ease-in-out flex flex-col gap-4 flex-shrink-0`}>
         {/* Header / New Chat */}
         <div className="flex items-center justify-between px-2 min-w-[300px]">
-          <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.1</span>
+          </div>
           <div className="flex items-center gap-1">
             <button onClick={() => setShowApiKeyModal(true)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="Change API Key">
               <Key size={20} />
