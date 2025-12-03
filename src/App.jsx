@@ -1292,61 +1292,61 @@ const AiNotebook = () => {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#1e1e1e] text-gray-200 rounded-3xl overflow-hidden font-sans">
+    <div className="max-w-[1600px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans">
       {/* Left Sidebar: Sources */}
       <div className="w-full md:w-[350px] flex flex-col gap-4 flex-shrink-0">
         {/* Header / New Chat */}
         <div className="flex items-center justify-between px-2">
-          <h1 className="text-xl font-medium text-gray-100">Notebook</h1>
-          <button onClick={createNewChat} className="p-2 hover:bg-[#2d2d2d] rounded-full transition-colors text-gray-400 hover:text-white" title="New Chat">
+          <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
+          <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
             <MessageSquare size={20} />
           </button>
         </div>
 
         {/* Sources Panel */}
-        <div className="flex-1 flex flex-col bg-[#2d2d2d] rounded-2xl overflow-hidden border border-[#3e3e3e]">
-          <div className="p-4 border-b border-[#3e3e3e] flex items-center justify-between bg-[#2d2d2d]">
-            <span className="font-medium text-gray-200">Sources</span>
+        <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-white">
+            <span className="font-medium text-gray-700">Sources</span>
             <div className="flex items-center gap-2">
               {activeSession.files.length > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">Select all</span>
+                  <span className="text-xs text-gray-500">Select all</span>
                   <input
                     type="checkbox"
                     checked={activeSession.files.every(f => f.selected !== false)}
                     onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded border-gray-500 bg-[#1e1e1e] text-indigo-500 focus:ring-offset-[#2d2d2d] focus:ring-indigo-500 cursor-pointer"
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                   />
                 </div>
               )}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-gray-50/50">
             {activeSession.files.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-gray-500 text-center p-4">
+              <div className="h-full flex flex-col items-center justify-center text-gray-400 text-center p-4">
                 <Files size={48} className="mb-2 opacity-30" />
                 <p className="text-sm">No sources yet</p>
                 <p className="text-xs opacity-70">Upload PDF or Text</p>
               </div>
             ) : (
               activeSession.files.map((f, i) => (
-                <div key={i} className={`flex items-center justify-between p-3 rounded-xl transition-colors group ${f.selected !== false ? 'bg-[#383838]' : 'bg-transparent hover:bg-[#333]'}`}>
+                <div key={i} className={`flex items-center justify-between p-3 rounded-xl transition-colors group ${f.selected !== false ? 'bg-white border border-gray-200 shadow-sm' : 'bg-transparent hover:bg-gray-100 border border-transparent'}`}>
                   <div className="flex items-center gap-3 overflow-hidden flex-1">
-                    <div className="p-2 bg-[#1e1e1e] rounded-lg text-blue-400 flex-shrink-0">
+                    <div className="p-2 bg-blue-50 rounded-lg text-blue-600 flex-shrink-0">
                       <FileText size={18} />
                     </div>
-                    <span className={`truncate text-sm ${f.selected !== false ? "text-gray-200" : "text-gray-500"}`}>{f.name}</span>
+                    <span className={`truncate text-sm ${f.selected !== false ? "text-gray-900 font-medium" : "text-gray-500"}`}>{f.name}</span>
                   </div>
                   <div className="flex items-center gap-2 ml-2">
-                    <button onClick={() => removeFile(i)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1">
+                    <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1">
                       <Trash2 size={14} />
                     </button>
                     <input
                       type="checkbox"
                       checked={f.selected !== false}
                       onChange={() => toggleFileSelection(i)}
-                      className="w-5 h-5 rounded border-gray-500 bg-[#1e1e1e] text-indigo-500 focus:ring-offset-[#2d2d2d] focus:ring-indigo-500 cursor-pointer"
+                      className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -1354,29 +1354,29 @@ const AiNotebook = () => {
             )}
           </div>
 
-          <div className="p-4 border-t border-[#3e3e3e] bg-[#2d2d2d]">
+          <div className="p-4 border-t border-gray-100 bg-white">
             <div className="relative">
               <input type="file" accept=".pdf,.txt" multiple onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-              <button disabled={isProcessingFiles} className="w-full bg-[#1e1e1e] text-gray-300 font-medium py-3 rounded-full hover:bg-[#333] transition-colors flex justify-center items-center gap-2 border border-[#3e3e3e]">
-                {isProcessingFiles ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-500"></span> : <><Upload size={18} /><span>Add Source</span></>}
+              <button disabled={isProcessingFiles} className="w-full bg-gray-50 text-gray-600 font-medium py-3 rounded-full hover:bg-gray-100 transition-colors flex justify-center items-center gap-2 border border-gray-200">
+                {isProcessingFiles ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span> : <><Upload size={18} /><span>Add Source</span></>}
               </button>
             </div>
           </div>
         </div>
 
         {/* Session History (Mini) */}
-        <div className="bg-[#2d2d2d] rounded-2xl p-4 border border-[#3e3e3e] max-h-[200px] overflow-y-auto">
-          <h3 className="text-xs font-bold text-gray-500 uppercase mb-2 tracking-wider">Recent Chats</h3>
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm max-h-[200px] overflow-y-auto">
+          <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wider">Recent Chats</h3>
           <div className="space-y-1">
             {sessions.map(session => (
               <div
                 key={session.id}
                 onClick={() => setActiveSessionId(session.id)}
-                className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-[#383838] text-white' : 'text-gray-400 hover:bg-[#333] hover:text-gray-300'}`}
+                className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-indigo-50 text-indigo-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
               >
                 <span className="truncate text-sm">{session.title}</span>
                 {activeSessionId === session.id && (
-                  <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-500 hover:text-red-400">
+                  <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-400 hover:text-red-500">
                     <Trash2 size={12} />
                   </button>
                 )}
@@ -1387,21 +1387,21 @@ const AiNotebook = () => {
       </div>
 
       {/* Right Content: Chat */}
-      <div className="flex-1 flex flex-col bg-[#2d2d2d] rounded-2xl overflow-hidden border border-[#3e3e3e] relative">
-        <div className="p-4 border-b border-[#3e3e3e] flex justify-between items-center bg-[#2d2d2d]">
+      <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm relative">
+        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-200">{activeSession.title}</span>
+            <span className="font-medium text-gray-900">{activeSession.title}</span>
           </div>
-          <button onClick={() => setMessages([])} className="text-xs text-gray-500 hover:text-red-400 transition-colors">Clear Chat</button>
+          <button onClick={() => setMessages([])} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Clear Chat</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#1e1e1e]">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white">
           {activeSession.messages.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500">
-              <div className="w-16 h-16 bg-[#2d2d2d] rounded-2xl flex items-center justify-center mb-6">
-                <MessageSquare size={32} className="text-indigo-400" />
+            <div className="h-full flex flex-col items-center justify-center text-gray-400">
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
+                <MessageSquare size={32} className="text-indigo-600" />
               </div>
-              <p className="text-lg font-medium text-gray-300 mb-2">Welcome to your Notebook</p>
+              <p className="text-lg font-medium text-gray-700 mb-2">Welcome to your Notebook</p>
               <p className="text-sm text-gray-500 mb-8 max-w-md text-center">Upload sources to get started, then ask questions or use the quick actions below.</p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl px-4">
@@ -1414,7 +1414,7 @@ const AiNotebook = () => {
                   <button
                     key={i}
                     onClick={() => { setInput(item.prompt); handleSend(item.prompt); }}
-                    className="p-4 bg-[#2d2d2d] border border-[#3e3e3e] rounded-xl text-sm text-gray-300 hover:border-indigo-500/50 hover:bg-[#333] transition-all text-left shadow-sm flex items-center gap-3"
+                    className="p-4 bg-white border border-gray-200 rounded-xl text-sm text-gray-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all text-left shadow-sm flex items-center gap-3"
                   >
                     <span className="text-xl">{item.label.split(' ')[0]}</span>
                     <span>{item.label.split(' ').slice(1).join(' ')}</span>
@@ -1425,8 +1425,8 @@ const AiNotebook = () => {
           )}
           {activeSession.messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-[#383838] text-white rounded-br-none' : 'bg-transparent text-gray-300'}`}>
-                {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-400 mb-1">AI Answer</div>}
+              <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-gray-50 border border-gray-100 text-gray-800 shadow-sm'}`}>
+                {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-600 mb-1">AI Answer</div>}
                 {msg.text.includes('```markmap') ? (
                   <div>
                     <p className="whitespace-pre-wrap text-sm leading-relaxed mb-2">{msg.text.split('```markmap')[0]}</p>
@@ -1441,17 +1441,17 @@ const AiNotebook = () => {
           ))}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-transparent p-4 rounded-2xl text-gray-400 flex items-center gap-2">
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-2">
+                <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
               </div>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 bg-[#2d2d2d] border-t border-[#3e3e3e]">
+        <div className="p-4 bg-white border-t border-gray-100">
           <div className="relative max-w-4xl mx-auto">
             <input
               type="text"
@@ -1459,7 +1459,7 @@ const AiNotebook = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Type something..."
-              className="w-full bg-[#1e1e1e] text-white border border-[#3e3e3e] rounded-full py-4 pl-6 pr-14 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder-gray-500 shadow-lg"
+              className="w-full bg-white text-gray-900 border border-gray-200 rounded-full py-4 pl-6 pr-14 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder-gray-400 shadow-lg"
             />
             <button
               onClick={() => handleSend()}
@@ -1470,7 +1470,7 @@ const AiNotebook = () => {
             </button>
           </div>
           <div className="text-center mt-2">
-            <p className="text-[10px] text-gray-500">Notebook may display inaccurate info, including about people, so double-check its responses.</p>
+            <p className="text-[10px] text-gray-400">Notebook may display inaccurate info, including about people, so double-check its responses.</p>
           </div>
         </div>
       </div>
