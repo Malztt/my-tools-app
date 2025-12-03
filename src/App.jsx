@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
-  Key, Eye, EyeOff, AlertCircle
+  Key, Eye, EyeOff, AlertCircle, Search
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -433,12 +433,33 @@ const GeminiOCR = () => {
   );
 };
 
+// 6. OCSC Accreditation Search (Iframe)
+const OcscSearch = () => {
+  return (
+    <div className="w-full h-full flex flex-col animate-fade-in">
+      <div className="text-center space-y-2 mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">ค้นหาหลักสูตร (ก.พ.)</h2>
+        <p className="text-gray-500 text-sm">ระบบรับรองคุณวุฒิ สำนักงาน ก.พ.</p>
+      </div>
+      <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
+        <iframe
+          src="https://accreditation.ocsc.go.th/accreditation/search/curriculum"
+          className="w-full h-full border-0"
+          title="OCSC Search"
+          sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+        />
+      </div>
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const tools = [
     { id: 'ocr', label: 'Gemini OCR', icon: Zap },
+    { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search },
     { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link },
     { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
     { id: 'compress_pdf', label: 'จัดการ PDF', icon: FileType },
@@ -456,7 +477,16 @@ const App = () => {
       </aside>
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white border-b border-gray-200 p-4 flex items-center md:hidden"><button onClick={() => setSidebarOpen(true)} className="p-2"><Menu size={24} /></button><span className="ml-4 font-bold">WorkTools</span></header>
-        <div className="flex-1 overflow-y-auto p-4 md:p-8"><div className="max-w-5xl mx-auto">{activeTab === 'shorten' && <UrlShortener />}{activeTab === 'compress_img' && <ImageCompressor />}{activeTab === 'compress_pdf' && <PdfOptimizer />}{activeTab === 'qrcode' && <QRCodeGenerator />}{activeTab === 'ocr' && <GeminiOCR />}</div></div>
+        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className={`max-w-5xl mx-auto ${activeTab === 'ocsc' ? 'h-full flex flex-col' : ''}`}>
+            {activeTab === 'shorten' && <UrlShortener />}
+            {activeTab === 'compress_img' && <ImageCompressor />}
+            {activeTab === 'compress_pdf' && <PdfOptimizer />}
+            {activeTab === 'qrcode' && <QRCodeGenerator />}
+            {activeTab === 'ocr' && <GeminiOCR />}
+            {activeTab === 'ocsc' && <OcscSearch />}
+          </div>
+        </div>
       </main>
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }`}</style>
     </div>
