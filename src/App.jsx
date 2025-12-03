@@ -1192,7 +1192,16 @@ const MarkmapView = ({ markdown }) => {
 
 // 10. AI Notebook (Chat with Documents)
 const AiNotebook = () => {
-  const [apiKey, setApiKey] = useState('AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
+  const [showApiKeyModal, setShowApiKeyModal] = useState(!localStorage.getItem('gemini_api_key'));
+
+  const handleSaveApiKey = (key) => {
+    if (key.trim()) {
+      localStorage.setItem('gemini_api_key', key.trim());
+      setApiKey(key.trim());
+      setShowApiKeyModal(false);
+    }
+  };
 
   // Session Management
   const [sessions, setSessions] = useState(() => {
@@ -1395,12 +1404,55 @@ const AiNotebook = () => {
 
   return (
     <div className="max-w-[1800px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans relative">
+      {/* API Key Modal */}
+      {showApiKeyModal && (
+        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full animate-scale-in">
+            <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mb-4 mx-auto">
+              <Key size={24} className="text-indigo-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">Enter Gemini API Key</h2>
+            <p className="text-center text-gray-500 mb-6">
+              To use the AI Notebook, you need a Google Gemini API key. It's free and easy to get.
+            </p>
+            <form onSubmit={(e) => { e.preventDefault(); handleSaveApiKey(e.target.apiKey.value); }}>
+              <input
+                name="apiKey"
+                type="password"
+                placeholder="Paste your API key here..."
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 mb-4 outline-none transition-all"
+                autoFocus
+              />
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
+              >
+                Save API Key
+              </button>
+            </form>
+            <div className="mt-4 text-center">
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
+              >
+                Get a free API key <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Left Sidebar: Sources */}
       <div className={`${showSources ? 'w-full md:w-[300px]' : 'w-0 opacity-0 overflow-hidden p-0'} transition-all duration-300 ease-in-out flex flex-col gap-4 flex-shrink-0`}>
         {/* Header / New Chat */}
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
           <div className="flex items-center gap-1">
+            <button onClick={() => setShowApiKeyModal(true)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="Change API Key">
+              <Key size={20} />
+            </button>
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
               <MessageSquare size={20} />
             </button>
