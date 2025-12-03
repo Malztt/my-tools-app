@@ -1137,7 +1137,16 @@ const MarkmapView = ({ markdown }) => {
   useEffect(() => {
     if (svgRef.current && markdown) {
       if (!mmRef.current) {
-        mmRef.current = Markmap.create(svgRef.current);
+        mmRef.current = Markmap.create(svgRef.current, {
+          color: ['#a5b4fc', '#818cf8', '#6366f1'], // Indigo shades
+          initialExpandLevel: 2,
+          maxWidth: 300,
+          spacingVertical: 15,
+          paddingX: 20,
+          embedGlobalCSS: true,
+          fitRatio: 0.95,
+          duration: 500,
+        });
       }
       const { root } = transformer.transform(markdown);
       mmRef.current.setData(root);
@@ -1152,21 +1161,28 @@ const MarkmapView = ({ markdown }) => {
   }, [isFullscreen]);
 
   return (
-    <div className={isFullscreen ? "fixed inset-0 z-50 bg-white p-8 flex flex-col animate-fade-in" : "w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200 overflow-hidden my-2 relative group transition-all"}>
+    <div className={isFullscreen ? "fixed inset-0 z-50 bg-[#1e1e2e] p-8 flex flex-col animate-fade-in" : "w-full h-[400px] bg-[#27273a] rounded-xl border border-gray-700/50 overflow-hidden my-2 relative group transition-all shadow-lg"}>
       <div className="absolute top-4 right-4 z-10 flex gap-2">
         {isFullscreen ? (
-          <button onClick={() => setIsFullscreen(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 text-gray-600 shadow-sm">
+          <button onClick={() => setIsFullscreen(false)} className="p-2 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 text-white shadow-sm border border-white/10 transition-colors">
             <X size={24} />
           </button>
         ) : (
-          <button onClick={() => setIsFullscreen(true)} className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-600 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity border border-gray-200">
+          <button onClick={() => setIsFullscreen(true)} className="p-2 bg-black/20 backdrop-blur-md rounded-full hover:bg-black/40 text-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity border border-white/10">
             <Maximize2 size={20} />
           </button>
         )}
       </div>
+      {/* Custom CSS for Markmap Nodes to look like cards */}
+      <style>{`
+        .markmap-node-text { fill: #e2e8f0 !important; font-family: 'Inter', sans-serif; }
+        .markmap-link { stroke: #6366f1 !important; stroke-width: 2px; }
+        .markmap-node-circle { fill: #6366f1 !important; stroke: #fff !important; }
+        svg { background: transparent !important; }
+      `}</style>
       <svg ref={svgRef} className="w-full h-full" />
       {!isFullscreen && (
-        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none">
+        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none bg-black/50 px-2 py-1 rounded backdrop-blur-sm">
           Zoom/Pan enabled
         </div>
       )}
