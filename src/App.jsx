@@ -1122,9 +1122,17 @@ const AiNotebook = () => {
 
   // Session Management
   const [sessions, setSessions] = useState(() => {
-    const saved = localStorage.getItem('ai_notebook_sessions');
-    return saved ? JSON.parse(saved) : [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
+    try {
+      const saved = localStorage.getItem('ai_notebook_sessions');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return (parsed && Array.isArray(parsed) && parsed.length > 0)
+        ? parsed
+        : [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
+    } catch (e) {
+      return [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
+    }
   });
+
   const [activeSessionId, setActiveSessionId] = useState(() => {
     return localStorage.getItem('ai_notebook_active_session') || sessions[0]?.id;
   });
@@ -1140,6 +1148,7 @@ const AiNotebook = () => {
 
   // Derived state setters (helpers to update active session)
   const setFiles = (newFiles) => {
+    if (!activeSession) return;
     setSessions(prev => prev.map(s => {
       if (s.id === activeSession.id) {
         const updatedFiles = typeof newFiles === 'function' ? newFiles(s.files) : newFiles;
@@ -1150,6 +1159,7 @@ const AiNotebook = () => {
   };
 
   const setMessages = (newMessages) => {
+    if (!activeSession) return;
     setSessions(prev => prev.map(s => {
       if (s.id === activeSession.id) {
         const updatedMessages = typeof newMessages === 'function' ? newMessages(s.messages) : newMessages;
@@ -1167,9 +1177,11 @@ const AiNotebook = () => {
 
   // Persist to LocalStorage
   useEffect(() => {
-    localStorage.setItem('ai_notebook_sessions', JSON.stringify(sessions));
-    localStorage.setItem('ai_notebook_active_session', activeSession.id);
-  }, [sessions, activeSession.id]);
+    if (activeSession) {
+      localStorage.setItem('ai_notebook_sessions', JSON.stringify(sessions));
+      localStorage.setItem('ai_notebook_active_session', activeSession.id);
+    }
+  }, [sessions, activeSession]);
 
   const createNewChat = () => {
     const newSession = { id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() };
