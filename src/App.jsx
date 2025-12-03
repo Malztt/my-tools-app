@@ -1292,9 +1292,9 @@ const AiNotebook = () => {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans">
+    <div className="max-w-[1800px] mx-auto h-[calc(100vh-100px)] min-h-[600px] flex flex-col md:flex-row gap-4 animate-fade-in p-4 bg-[#f8f9fa] text-gray-900 rounded-3xl overflow-hidden font-sans">
       {/* Left Sidebar: Sources */}
-      <div className="w-full md:w-[350px] flex flex-col gap-4 flex-shrink-0">
+      <div className="w-full md:w-[300px] flex flex-col gap-4 flex-shrink-0">
         {/* Header / New Chat */}
         <div className="flex items-center justify-between px-2">
           <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
@@ -1386,7 +1386,7 @@ const AiNotebook = () => {
         </div>
       </div>
 
-      {/* Right Content: Chat */}
+      {/* Center Content: Chat */}
       <div className="flex-1 flex flex-col bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm relative">
         <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white">
           <div className="flex items-center gap-2">
@@ -1402,25 +1402,7 @@ const AiNotebook = () => {
                 <MessageSquare size={32} className="text-indigo-600" />
               </div>
               <p className="text-lg font-medium text-gray-700 mb-2">Welcome to your Notebook</p>
-              <p className="text-sm text-gray-500 mb-8 max-w-md text-center">Upload sources to get started, then ask questions or use the quick actions below.</p>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl px-4">
-                {[
-                  { label: '📝 Summarize', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-                  { label: '🧠 Mind Map', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Markdown Format (ใช้ - สำหรับหัวข้อ) ใส่ใน code block ```markmap ... ```' },
-                  { label: '🔑 Key Points', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
-                  { label: '❓ Quiz Me', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
-                ].map((item, i) => (
-                  <button
-                    key={i}
-                    onClick={() => { setInput(item.prompt); handleSend(item.prompt); }}
-                    className="p-4 bg-white border border-gray-200 rounded-xl text-sm text-gray-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all text-left shadow-sm flex items-center gap-3"
-                  >
-                    <span className="text-xl">{item.label.split(' ')[0]}</span>
-                    <span>{item.label.split(' ').slice(1).join(' ')}</span>
-                  </button>
-                ))}
-              </div>
+              <p className="text-sm text-gray-500 mb-8 max-w-md text-center">Upload sources to get started, then ask questions or use the Studio on the right.</p>
             </div>
           )}
           {activeSession.messages.map((msg, i) => (
@@ -1471,6 +1453,37 @@ const AiNotebook = () => {
           </div>
           <div className="text-center mt-2">
             <p className="text-[10px] text-gray-400">Notebook may display inaccurate info, including about people, so double-check its responses.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Sidebar: Studio */}
+      <div className="w-full md:w-[300px] flex flex-col gap-4 flex-shrink-0">
+        <div className="p-2">
+          <h2 className="text-xl font-medium text-gray-700">Studio</h2>
+        </div>
+        <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 overflow-y-auto">
+          <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+            <p className="text-xs text-indigo-800 font-medium mb-1">✨ AI Studio</p>
+            <p className="text-[10px] text-indigo-600">Generate different formats from your sources.</p>
+          </div>
+
+          <div className="space-y-3">
+            {[
+              { label: 'Summarize', icon: '📝', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
+              { label: 'Mind Map', icon: '🧠', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Markdown Format (ใช้ - สำหรับหัวข้อ) ใส่ใน code block ```markmap ... ```' },
+              { label: 'Key Points', icon: '🔑', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
+              { label: 'Quiz Me', icon: '❓', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
+            ].map((item, i) => (
+              <button
+                key={i}
+                onClick={() => { setInput(item.prompt); handleSend(item.prompt); }}
+                className="w-full p-4 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all text-left shadow-sm flex items-center gap-3 group"
+              >
+                <span className="text-xl group-hover:scale-110 transition-transform">{item.icon}</span>
+                <span className="font-medium">{item.label}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
