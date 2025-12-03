@@ -1403,7 +1403,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.2</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.3</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
@@ -1533,21 +1533,33 @@ const AiNotebook = () => {
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-gray-50 border border-gray-100 text-gray-800 shadow-sm'}`}>
                 {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-600 mb-1">AI Answer</div>}
-                {msg.text.includes('```markmap') ? (
-                  <div>
-                    <ReactMarkdown className="prose prose-sm max-w-none mb-2">
-                      {msg.text.split('```markmap')[0]}
+                {(() => {
+                  // Robust Mind Map Extraction
+                  const mindMapRegex = /```(?:markmap|markdown|md|)\s*([\s\S]*?)```/;
+                  const match = msg.text.match(mindMapRegex);
+                  const isMindMap = match && match[1].includes('- ');
+
+                  if (isMindMap) {
+                    const content = match[1].trim();
+                    const parts = msg.text.split(match[0]);
+                    const before = parts[0] || '';
+                    const after = parts.slice(1).join(match[0]) || ''; // Join back if multiple blocks (simplified)
+
+                    return (
+                      <div>
+                        <ReactMarkdown className="prose prose-sm max-w-none mb-2">{before}</ReactMarkdown>
+                        <MarkmapView markdown={content} />
+                        <ReactMarkdown className="prose prose-sm max-w-none mt-2">{after}</ReactMarkdown>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <ReactMarkdown className="prose prose-sm max-w-none">
+                      {msg.text}
                     </ReactMarkdown>
-                    <MarkmapView markdown={msg.text.split('```markmap')[1].split('```')[0].trim()} />
-                    <ReactMarkdown className="prose prose-sm max-w-none mt-2">
-                      {msg.text.split('```')[2]}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <ReactMarkdown className="prose prose-sm max-w-none">
-                    {msg.text}
-                  </ReactMarkdown>
-                )}
+                  );
+                })()}
               </div>
             </div>
           ))}
