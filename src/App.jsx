@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Link, FileImage, QrCode, FileText, Copy, Check, Upload,
   Download, Scissors, Menu, X, Zap, Layout, FileType,
-  Key, Eye, EyeOff, AlertCircle, Search, ExternalLink
+  Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
+  FileSpreadsheet, Images as ImageIcon, FileType2
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -462,6 +463,278 @@ const OcscSearch = () => {
   );
 };
 
+// 7. PDF Converter (PDF <-> JPG)
+const PdfConverter = () => {
+  const [mode, setMode] = useState('pdf_to_jpg'); // pdf_to_jpg, jpg_to_pdf
+  const [files, setFiles] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [result, setResult] = useState(null);
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFiles(Array.from(e.target.files));
+      setResult(null);
+      setStatusMsg('');
+    }
+  };
+
+  const convertPdfToJpg = async () => {
+    if (files.length === 0) return;
+    setIsProcessing(true);
+    setStatusMsg('กำลังแปลง PDF เป็นรูปภาพ...');
+
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
+      const file = files[0];
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages;
+      const images = [];
+
+      for (let i = 1; i <= numPages; i++) {
+        setStatusMsg(`กำลังแปลงหน้า ${i} จาก ${numPages}...`);
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 2.0 }); // High quality
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        images.push(canvas.toDataURL('image/jpeg', 0.9));
+      }
+
+      setResult({ type: 'images', data: images });
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const convertJpgToPdf = async () => {
+    if (files.length === 0) return;
+    setIsProcessing(true);
+    setStatusMsg('กำลังรวมรูปภาพเป็น PDF...');
+
+    try {
+      const PDFLib = await import('pdf-lib');
+      const newPdfDoc = await PDFLib.PDFDocument.create();
+
+      for (let i = 0; i < files.length; i++) {
+        setStatusMsg(`กำลังประมวลผลรูปที่ ${i + 1}...`);
+        const file = files[i];
+        const arrayBuffer = await file.arrayBuffer();
+        let image;
+        if (file.type === 'image/jpeg') {
+          image = await newPdfDoc.embedJpg(arrayBuffer);
+        } else if (file.type === 'image/png') {
+          image = await newPdfDoc.embedPng(arrayBuffer);
+        } else {
+          continue; // Skip unsupported
+        }
+
+        const page = newPdfDoc.addPage([image.width, image.height]);
+        page.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: image.width,
+          height: image.height,
+        });
+      }
+
+      const pdfBytes = await newPdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      setResult({ type: 'pdf', url: url });
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-bold text-gray-800">แปลงไฟล์ PDF / รูปภาพ</h2>
+      </div>
+
+      <div className="flex justify-center gap-4 mb-6">
+        <button onClick={() => { setMode('pdf_to_jpg'); setFiles([]); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'pdf_to_jpg' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>PDF เป็น JPG</button>
+        <button onClick={() => { setMode('jpg_to_pdf'); setFiles([]); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'jpg_to_pdf' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>JPG เป็น PDF</button>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="space-y-6">
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+            <input
+              type="file"
+              accept={mode === 'pdf_to_jpg' ? ".pdf" : "image/jpeg, image/png"}
+              multiple={mode === 'jpg_to_pdf'}
+              onChange={handleFileChange}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center">
+              {mode === 'pdf_to_jpg' ? <FileType2 size={32} /> : <ImageIcon size={32} />}
+            </div>
+            <p className="font-medium text-gray-700">
+              {files.length > 0 ? `เลือกแล้ว ${files.length} ไฟล์` : (mode === 'pdf_to_jpg' ? "อัปโหลดไฟล์ PDF" : "อัปโหลดรูปภาพ (เลือกได้หลายรูป)")}
+            </p>
+          </div>
+
+          <button
+            onClick={mode === 'pdf_to_jpg' ? convertPdfToJpg : convertJpgToPdf}
+            disabled={isProcessing || files.length === 0}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>เริ่มแปลงไฟล์</span></>}
+          </button>
+          {statusMsg && <p className="text-center text-sm text-gray-500">{statusMsg}</p>}
+
+          {result && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
+                <Check size={20} /> <span>เรียบร้อย!</span>
+              </div>
+              {result.type === 'pdf' ? (
+                <a href={result.url} download="converted.pdf" className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลด PDF</a>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {result.data.map((img, idx) => (
+                    <a key={idx} href={img} download={`page-${idx + 1}.jpg`} className="block">
+                      <img src={img} alt={`Page ${idx + 1}`} className="w-full rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
+                      <div className="text-center text-xs mt-1 text-gray-500">ดาวน์โหลดหน้า {idx + 1}</div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 8. Excel Converter (XLS <-> CSV)
+const ExcelConverter = () => {
+  const [mode, setMode] = useState('xls_to_csv'); // xls_to_csv, csv_to_xls
+  const [file, setFile] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [result, setResult] = useState(null);
+
+  const handleFileChange = (e) => {
+    if (e.target.files[0]) {
+      setFile(e.target.files[0]);
+      setResult(null);
+      setStatusMsg('');
+    }
+  };
+
+  const processFile = async () => {
+    if (!file) return;
+    setIsProcessing(true);
+    setStatusMsg('กำลังประมวลผล...');
+
+    try {
+      const XLSX = await import('xlsx');
+      const arrayBuffer = await file.arrayBuffer();
+
+      if (mode === 'xls_to_csv') {
+        const workbook = XLSX.read(arrayBuffer);
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const csv = XLSX.utils.sheet_to_csv(worksheet);
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".csv" });
+      } else {
+        // CSV to XLS
+        // Need to read as string for CSV
+        const text = await file.text();
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.aoa_to_sheet(
+          text.split('\n').map(row => row.split(',')) // Simple CSV parser, might need more robust one for complex CSVs but XLSX.read usually handles it better if we pass type: string
+        );
+        // Better approach for CSV to Sheet using XLSX read
+        const wb = XLSX.read(text, { type: 'string', raw: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+
+        const xlsxBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".xlsx" });
+      }
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-bold text-gray-800">แปลงไฟล์ Excel / CSV</h2>
+      </div>
+
+      <div className="flex justify-center gap-4 mb-6">
+        <button onClick={() => { setMode('xls_to_csv'); setFile(null); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'xls_to_csv' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>Excel เป็น CSV</button>
+        <button onClick={() => { setMode('csv_to_xls'); setFile(null); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'csv_to_xls' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>CSV เป็น Excel</button>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="space-y-6">
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+            <input
+              type="file"
+              accept={mode === 'xls_to_csv' ? ".xlsx, .xls" : ".csv"}
+              onChange={handleFileChange}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <div className="bg-green-100 text-green-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center">
+              <FileSpreadsheet size={32} />
+            </div>
+            <p className="font-medium text-gray-700">
+              {file ? file.name : (mode === 'xls_to_csv' ? "อัปโหลดไฟล์ Excel" : "อัปโหลดไฟล์ CSV")}
+            </p>
+          </div>
+
+          <button
+            onClick={processFile}
+            disabled={isProcessing || !file}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>เริ่มแปลงไฟล์</span></>}
+          </button>
+          {statusMsg && <p className="text-center text-sm text-gray-500">{statusMsg}</p>}
+
+          {result && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
+                <Check size={20} /> <span>เรียบร้อย!</span>
+              </div>
+              <a href={result.url} download={result.name} className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลดไฟล์ใหม่</a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
@@ -469,6 +742,8 @@ const App = () => {
   const tools = [
     { id: 'ocr', label: 'Gemini OCR', icon: Zap },
     { id: 'ocsc', label: 'ค้นหาหลักสูตร ก.พ.', icon: Search },
+    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
+    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'shorten', label: 'ย่อลิงก์ (Real)', icon: Link },
     { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
     { id: 'compress_pdf', label: 'จัดการ PDF', icon: FileType },
@@ -494,6 +769,8 @@ const App = () => {
             {activeTab === 'qrcode' && <QRCodeGenerator />}
             {activeTab === 'ocr' && <GeminiOCR />}
             {activeTab === 'ocsc' && <OcscSearch />}
+            {activeTab === 'pdf_conv' && <PdfConverter />}
+            {activeTab === 'xls_conv' && <ExcelConverter />}
           </div>
         </div>
       </main>
