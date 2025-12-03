@@ -505,8 +505,9 @@ const QRCodeGenerator = () => {
 
 // 5. Gemini OCR (Real API + PDF Support)
 const GeminiOCR = () => {
-  const [apiKey, setApiKey] = useState('AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk');
-  const [showKey, setShowKey] = useState(false);
+  const [apiKey] = useState(() => {
+    return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
+  });
   const [image, setImage] = useState(null);
   const [mimeType, setMimeType] = useState('');
   const [imageBase64, setImageBase64] = useState(null);
@@ -514,8 +515,6 @@ const GeminiOCR = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
-
-  useEffect(() => localStorage.setItem('gemini_api_key', apiKey), [apiKey]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -1404,7 +1403,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.1</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.2</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
