@@ -1153,9 +1153,14 @@ const MarkmapView = ({ markdown }) => {
           duration: 500,
         });
       }
-      const { root } = transformer.transform(markdown);
-      mmRef.current.setData(root);
-      mmRef.current.fit();
+      try {
+        const { root } = transformer.transform(markdown);
+        if (!root) return;
+        mmRef.current.setData(root);
+        setTimeout(() => mmRef.current.fit(), 200);
+      } catch (e) {
+        console.error("Markmap render error:", e);
+      }
     }
   }, [markdown]);
 
@@ -1409,7 +1414,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.4</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.5</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
@@ -1622,7 +1627,7 @@ const AiNotebook = () => {
           <div className="space-y-3">
             {[
               { label: 'Summarize', icon: '📝', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-              { label: 'Mind Map', icon: '🧠', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Markdown Format (ใช้ - สำหรับหัวข้อ) ใส่ใน code block ```markmap ... ```' },
+              { label: 'Mind Map', icon: '🧠', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา โดยใช้ Markdown List (ใช้ - สำหรับหัวข้อหลักและย่อย) ห้ามใช้ # ใส่ใน code block ```markmap ... ```' },
               { label: 'Key Points', icon: '🔑', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
               { label: 'Quiz Me', icon: '❓', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
             ].map((item, i) => (
