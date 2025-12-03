@@ -1074,6 +1074,7 @@ const transformer = new Transformer();
 const MarkmapView = ({ markdown }) => {
   const svgRef = useRef(null);
   const mmRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (svgRef.current && markdown) {
@@ -1086,12 +1087,31 @@ const MarkmapView = ({ markdown }) => {
     }
   }, [markdown]);
 
+  useEffect(() => {
+    if (mmRef.current) {
+      setTimeout(() => mmRef.current.fit(), 100);
+    }
+  }, [isFullscreen]);
+
   return (
-    <div className="w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200 overflow-hidden my-2 relative group">
-      <svg ref={svgRef} className="w-full h-full" />
-      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none">
-        Zoom/Pan enabled
+    <div className={isFullscreen ? "fixed inset-0 z-50 bg-white p-8 flex flex-col animate-fade-in" : "w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200 overflow-hidden my-2 relative group transition-all"}>
+      <div className="absolute top-4 right-4 z-10 flex gap-2">
+        {isFullscreen ? (
+          <button onClick={() => setIsFullscreen(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 text-gray-600 shadow-sm">
+            <X size={24} />
+          </button>
+        ) : (
+          <button onClick={() => setIsFullscreen(true)} className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-600 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity border border-gray-200">
+            <Maximize2 size={20} />
+          </button>
+        )}
       </div>
+      <svg ref={svgRef} className="w-full h-full" />
+      {!isFullscreen && (
+        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 pointer-events-none">
+          Zoom/Pan enabled
+        </div>
+      )}
     </div>
   );
 };
