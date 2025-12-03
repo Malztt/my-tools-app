@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist';
@@ -1071,7 +1071,7 @@ const PdfMerger = () => {
 const MermaidDiagram = ({ code }) => {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState(null);
-  const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+  const id = useMemo(() => `mermaid-${Math.random().toString(36).substr(2, 9)}`, []);
 
   useEffect(() => {
     mermaid.initialize({ startOnLoad: false, theme: 'default' });
