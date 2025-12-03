@@ -1241,7 +1241,7 @@ const AiNotebook = () => {
               <div className="grid grid-cols-2 gap-3 w-full max-w-md px-4">
                 {[
                   { label: '📝 สรุปเนื้อหา', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-                  { label: '🧠 แผนผังความคิด', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Mermaid.js syntax (graph LR) ไม่ต้องอธิบายเพิ่ม ขอแค่โค้ด' },
+                  { label: '🧠 แผนผังความคิด', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา เชื่อมโยงประเด็นต่างๆ โดยใช้ Mermaid.js syntax (graph TD) **สำคัญ: ต้องใส่เครื่องหมายคำพูดครอบข้อความใน Node เสมอ** เช่น A["หัวข้อหลัก"] --> B["หัวข้อย่อย"] เพื่อป้องกัน Error' },
                   { label: '🔑 ประเด็นสำคัญ', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
                   { label: '❓ ตั้งคำถามทดสอบ', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
                 ].map((item, i) => (
@@ -1262,7 +1262,7 @@ const AiNotebook = () => {
                 {msg.text.includes('```mermaid') ? (
                   <div>
                     <p className="whitespace-pre-wrap text-sm leading-relaxed mb-2">{msg.text.split('```mermaid')[0]}</p>
-                    <MermaidDiagram code={msg.text.split('```mermaid')[1].split('```')[0]} />
+                    <MermaidDiagram code={msg.text.split('```mermaid')[1].split('```')[0].trim()} />
                     <p className="whitespace-pre-wrap text-sm leading-relaxed mt-2">{msg.text.split('```')[2]}</p>
                   </div>
                 ) : (
