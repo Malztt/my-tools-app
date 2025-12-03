@@ -1008,12 +1008,13 @@ const PdfMerger = () => {
                     >
                       {pages.map((page, i) => (
                         <Draggable key={page.id} draggableId={page.id} index={i}>
-                          {(provided) => (
+                          {(provided, snapshot) => (
                             <div
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className="relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
+                              style={{ ...provided.draggableProps.style }}
+                              className={`relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow ${snapshot.isDragging ? 'z-50 ring-2 ring-indigo-500 shadow-xl' : ''}`}
                             >
                               <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
                                 <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
