@@ -19,7 +19,6 @@ import {
 import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 // --- Helper Functions ---
 const formatSize = (bytes) => {
@@ -1455,16 +1454,16 @@ const AiNotebook = () => {
                 {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-600 mb-1">AI Answer</div>}
                 {msg.text.includes('```markmap') ? (
                   <div>
-                    <ReactMarkdown className="prose prose-sm max-w-none mb-2" remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown className="prose prose-sm max-w-none mb-2">
                       {msg.text.split('```markmap')[0]}
                     </ReactMarkdown>
                     <MarkmapView markdown={msg.text.split('```markmap')[1].split('```')[0].trim()} />
-                    <ReactMarkdown className="prose prose-sm max-w-none mt-2" remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown className="prose prose-sm max-w-none mt-2">
                       {msg.text.split('```')[2]}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <ReactMarkdown className="prose prose-sm max-w-none" remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown className="prose prose-sm max-w-none">
                     {msg.text}
                   </ReactMarkdown>
                 )}
