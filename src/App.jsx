@@ -202,8 +202,8 @@ const PdfOptimizer = () => {
       const PDFLib = await import('pdf-lib');
       const pdfjs = await import('pdfjs-dist');
 
-      // Set worker source (using CDN for simplicity and reliability)
-      pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+      // Set worker source (using unpkg for better compatibility with newer versions)
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
       const arrayBuffer = await file.arrayBuffer();
       const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
@@ -486,7 +486,7 @@ const PdfConverter = () => {
 
     try {
       const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
       const file = files[0];
       const arrayBuffer = await file.arrayBuffer();
