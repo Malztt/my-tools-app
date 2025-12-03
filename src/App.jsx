@@ -300,9 +300,9 @@ const PdfOptimizer = () => {
             {!processedPdf ? (
               <div className="space-y-3">
                 <button onClick={processPdf} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-red-200 flex justify-center items-center gap-2">
-                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg} ({progress}%)</span></> : <><Zap size={20} /><span>เริ่มบีบอัด (แปลงเป็นภาพ)</span></>}
+                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg} ({progress}%)</span></> : <><Zap size={20} /><span>เริ่มบีบอัด</span></>}
                 </button>
-                <p className="text-xs text-gray-400 text-center">ระบบจะแปลงทุกหน้าเป็นรูปภาพเพื่อลดขนาดไฟล์ (ข้อความจะไม่สามารถค้นหาได้)</p>
+                <p className="text-xs text-gray-400 text-center">เมื่อบีบอัดแล้วข้อความจะไม่สามารถค้นหาได้</p>
 
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
                   <p className="text-sm font-medium text-gray-700">ระดับการบีบอัด (คุณภาพ vs ขนาด)</p>
