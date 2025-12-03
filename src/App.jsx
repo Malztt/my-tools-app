@@ -201,18 +201,18 @@ const PdfOptimizer = () => {
 
     try {
       // Import libraries dynamically
-      const PDFLib = await import('pdf-lib');
-      const pdfjs = await import('pdfjs-dist');
+      // const PDFLib = await import('pdf-lib');
+      // const pdfjs = await import('pdfjs-dist');
 
       // Set worker source (using unpkg for better compatibility with newer versions)
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      // pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
       const arrayBuffer = await file.arrayBuffer();
       const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
       const numPages = pdf.numPages;
 
-      const newPdfDoc = await PDFLib.PDFDocument.create();
+      const newPdfDoc = await PDFDocument.create();
 
       for (let i = 1; i <= numPages; i++) {
         setStatusMsg(`กำลังแปลงหน้า ${i} จาก ${numPages}...`);
@@ -578,8 +578,8 @@ const PdfConverter = () => {
     setStatusMsg('กำลังแปลง PDF เป็นรูปภาพ...');
 
     try {
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      // const pdfjs = await import('pdfjs-dist');
+      // pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
       const file = files[0];
       const arrayBuffer = await file.arrayBuffer();
@@ -616,8 +616,8 @@ const PdfConverter = () => {
     setStatusMsg('กำลังรวมรูปภาพเป็น PDF...');
 
     try {
-      const PDFLib = await import('pdf-lib');
-      const newPdfDoc = await PDFLib.PDFDocument.create();
+      // const PDFLib = await import('pdf-lib');
+      const newPdfDoc = await PDFDocument.create();
 
       for (let i = 0; i < files.length; i++) {
         setStatusMsg(`กำลังประมวลผลรูปที่ ${i + 1}...`);
@@ -893,12 +893,12 @@ const PdfMerger = () => {
     setStatusMsg('กำลังรวมไฟล์...');
 
     try {
-      const PDFLib = await import('pdf-lib');
-      const mergedPdf = await PDFLib.PDFDocument.create();
+      // const PDFLib = await import('pdf-lib');
+      const mergedPdf = await PDFDocument.create();
 
       for (const file of files) {
         const arrayBuffer = await file.arrayBuffer();
-        const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+        const pdf = await PDFDocument.load(arrayBuffer);
         const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
         copiedPages.forEach((page) => mergedPdf.addPage(page));
       }
