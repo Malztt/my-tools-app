@@ -902,8 +902,8 @@ const SortableItem = (props) => {
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      {props.children}
+    <div ref={setNodeRef} style={style} {...attributes}>
+      {typeof props.children === 'function' ? props.children(listeners) : <div {...listeners}>{props.children}</div>}
     </div>
   );
 };
@@ -1063,27 +1063,32 @@ const PdfMerger = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200">
                     {pages.map((page, i) => (
                       <SortableItem key={page.id} id={page.id}>
-                        <div className="relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow h-full">
-                          <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
-                            <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
+                        {(listeners) => (
+                          <div className="relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow h-full">
+                            <div {...listeners} className="absolute top-2 left-2 z-20 bg-white/80 p-1 rounded cursor-grab active:cursor-grabbing hover:bg-white touch-none">
+                              <GripVertical size={14} className="text-gray-500" />
+                            </div>
+                            <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
+                              <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
+                            </div>
+                            <div className="text-xs text-gray-500 truncate" title={page.fileName}>{page.fileName}</div>
+                            <div className="text-xs font-bold text-gray-700 text-center mt-1">หน้า {page.pageNumber}</div>
+                            <button
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removePage(page.id);
+                              }}
+                              className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+                            >
+                              <X size={12} />
+                            </button>
+                            <div className="absolute bottom-2 right-2 bg-black/50 text-white px-1.5 py-0.5 rounded text-[10px] font-mono">
+                              {i + 1}
+                            </div>
                           </div>
-                          <div className="text-xs text-gray-500 truncate" title={page.fileName}>{page.fileName}</div>
-                          <div className="text-xs font-bold text-gray-700">หน้า {page.pageNumber}</div>
-                          <button
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removePage(page.id);
-                            }}
-                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
-                          >
-                            <X size={12} />
-                          </button>
-                          <div className="absolute top-2 left-2 bg-black/50 text-white px-1.5 py-0.5 rounded text-[10px] font-mono">
-                            {i + 1}
-                          </div>
-                        </div>
+                        )}
                       </SortableItem>
                     ))}
                   </div>
