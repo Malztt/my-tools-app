@@ -5,7 +5,9 @@ import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // Set worker source globally
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -938,12 +940,43 @@ const ExcelConverter = () => {
   );
 };
 
+// --- Sortable Item Component ---
+const SortableItem = (props) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: props.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 'auto',
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {props.children}
+    </div>
+  );
+};
+
 // 9. PDF Merger (Merge Multiple PDFs - Page Level)
 const PdfMerger = () => {
   const [pages, setPages] = useState([]); // { id, file, pageIndex, thumbnail }
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [resultPdf, setResultPdf] = useState(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const handleFileChange = async (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -992,16 +1025,20 @@ const PdfMerger = () => {
     }
   };
 
-  const removePage = (index) => {
-    setPages(prev => prev.filter((_, i) => i !== index));
+  const removePage = (id) => {
+    setPages(prev => prev.filter(page => page.id !== id));
   };
 
-  const onDragEnd = (result) => {
-    if (!result.destination) return;
-    const items = Array.from(pages);
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
-    setPages(items);
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (active.id !== over.id) {
+      setPages((items) => {
+        const oldIndex = items.findIndex(item => item.id === active.id);
+        const newIndex = items.findIndex(item => item.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
   };
 
   const mergePdfs = async () => {
@@ -1064,48 +1101,44 @@ const PdfMerger = () => {
                 <button onClick={() => setPages([])} className="text-xs text-red-500 hover:text-red-700">ล้างทั้งหมด</button>
               </div>
 
-              <DragDropContext onDragEnd={onDragEnd}>
-                <Droppable droppableId="page-grid">
-                  {(provided) => (
-                    <div
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200"
-                    >
-                      {pages.map((page, i) => (
-                        <Draggable key={page.id} draggableId={page.id} index={i}>
-                          {(provided, snapshot) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              style={{ ...provided.draggableProps.style }}
-                              className={`relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow ${snapshot.isDragging ? 'z-50 ring-2 ring-indigo-500 shadow-xl' : ''}`}
-                            >
-                              <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
-                                <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
-                              </div>
-                              <div className="text-xs text-gray-500 truncate" title={page.fileName}>{page.fileName}</div>
-                              <div className="text-xs font-bold text-gray-700">หน้า {page.pageNumber}</div>
-                              <button
-                                onClick={() => removePage(i)}
-                                className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                              >
-                                <X size={12} />
-                              </button>
-                              <div className="absolute top-2 left-2 bg-black/50 text-white px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                {i + 1}
-                              </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-              </DragDropContext>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={pages.map(p => p.id)}
+                  strategy={rectSortingStrategy}
+                >
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200">
+                    {pages.map((page, i) => (
+                      <SortableItem key={page.id} id={page.id}>
+                        <div className="relative group bg-white p-2 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow h-full">
+                          <div className="aspect-[3/4] bg-gray-100 mb-2 rounded overflow-hidden relative">
+                            <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
+                          </div>
+                          <div className="text-xs text-gray-500 truncate" title={page.fileName}>{page.fileName}</div>
+                          <div className="text-xs font-bold text-gray-700">หน้า {page.pageNumber}</div>
+                          <button
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePage(page.id);
+                            }}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+                          >
+                            <X size={12} />
+                          </button>
+                          <div className="absolute top-2 left-2 bg-black/50 text-white px-1.5 py-0.5 rounded text-[10px] font-mono">
+                            {i + 1}
+                          </div>
+                        </div>
+                      </SortableItem>
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
             </div>
           )}
 
@@ -1414,7 +1447,7 @@ const AiNotebook = () => {
         <div className="flex items-center justify-between px-2 min-w-[300px]">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-medium text-gray-700">Notebook</h1>
-            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.6</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.2.7</span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={createNewChat} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-900" title="New Chat">
@@ -1627,7 +1660,7 @@ const AiNotebook = () => {
           <div className="space-y-3">
             {[
               { label: 'Summarize', icon: '📝', prompt: 'ช่วยสรุปเนื้อหาสำคัญของเอกสารทั้งหมดให้หน่อย' },
-              { label: 'Mind Map', icon: '🧠', prompt: 'ช่วยสร้าง Mind Map สรุปเนื้อหา โดยใช้ Markdown List (ใช้ - สำหรับหัวข้อหลักและย่อย) ห้ามใช้ # ใส่ใน code block ```markmap ... ```' },
+              { label: 'Mind Map', icon: '🧠', prompt: 'สร้าง Mind Map สรุปเนื้อหาด้วย Markdown List (ใช้ - เท่านั้น) **ต้อง**ใส่ใน code block ```markmap ... ``` เสมอ ห้ามตอบเป็นข้อความธรรมดา' },
               { label: 'Key Points', icon: '🔑', prompt: 'ช่วยลิสต์ประเด็นสำคัญ 5 ข้อจากเอกสารนี้' },
               { label: 'Quiz Me', icon: '❓', prompt: 'ช่วยตั้งคำถามทดสอบความเข้าใจจากเนื้อหา 3 ข้อ พร้อมเฉลย' }
             ].map((item, i) => (
