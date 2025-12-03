@@ -1129,9 +1129,15 @@ const AiNotebook = () => {
     try {
       const saved = localStorage.getItem('ai_notebook_sessions');
       const parsed = saved ? JSON.parse(saved) : null;
-      return (parsed && Array.isArray(parsed) && parsed.length > 0)
-        ? parsed
-        : [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+        // Sanitize loaded data: ensure all required fields exist
+        return parsed.map(s => ({
+          ...s,
+          files: Array.isArray(s.files) ? s.files : [],
+          messages: Array.isArray(s.messages) ? s.messages : []
+        }));
+      }
+      return [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
     } catch (e) {
       return [{ id: Date.now().toString(), title: 'New Chat', files: [], messages: [], createdAt: Date.now() }];
     }
@@ -1439,7 +1445,7 @@ const AiNotebook = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white">
-          {activeSession.messages.length === 0 && (
+          {(activeSession.messages || []).length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-gray-400">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
                 <MessageSquare size={32} className="text-indigo-600" />
@@ -1448,7 +1454,7 @@ const AiNotebook = () => {
               <p className="text-sm text-gray-500 mb-8 max-w-md text-center">Upload sources to get started, then ask questions or use the Studio on the right.</p>
             </div>
           )}
-          {activeSession.messages.map((msg, i) => (
+          {(activeSession.messages || []).map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-gray-50 border border-gray-100 text-gray-800 shadow-sm'}`}>
                 {msg.role === 'ai' && <div className="text-xs font-bold text-indigo-600 mb-1">AI Answer</div>}
