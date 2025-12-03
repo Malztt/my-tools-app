@@ -14,7 +14,8 @@ import {
   Download, Scissors, Menu, X, Zap, Layout, FileType,
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
   FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical,
-  NotebookPen, MessageSquare, Send, Trash2, Maximize2
+  NotebookPen, MessageSquare, Send, Trash2, Maximize2,
+  PanelLeftOpen, PanelRightOpen, PanelRightClose
 } from 'lucide-react';
 import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
