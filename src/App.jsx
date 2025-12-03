@@ -1066,6 +1066,197 @@ const PdfMerger = () => {
   );
 };
 
+// 10. AI Notebook (Chat with Documents)
+const AiNotebook = () => {
+  const [apiKey, setApiKey] = useState('AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk');
+  const [files, setFiles] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleFileUpload = async (e) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    setIsProcessingFiles(true);
+
+    const newFiles = [];
+    for (const file of Array.from(e.target.files)) {
+      try {
+        let content = '';
+        if (file.type === 'application/pdf') {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            content += textContent.items.map(item => item.str).join(' ') + '\n';
+          }
+        } else if (file.type === 'text/plain') {
+          content = await file.text();
+        } else {
+          continue; // Skip unsupported
+        }
+
+        newFiles.push({
+          name: file.name,
+          type: file.type,
+          content: content
+        });
+      } catch (err) {
+        console.error("Error reading file:", err);
+      }
+    }
+
+    setFiles(prev => [...prev, ...newFiles]);
+    setIsProcessingFiles(false);
+  };
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || !apiKey) return;
+
+    const userMsg = { role: 'user', text: input };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      // Construct context from files
+      const context = files.map(f => `--- Document: ${f.name} ---\n${f.content}\n`).join('\n');
+      const prompt = `Context from uploaded documents:\n${context}\n\nUser Question: ${userMsg.text}\n\nAnswer based on the context provided. If the answer is not in the context, say so.`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 'ขออภัย ไม่สามารถตอบคำถามได้';
+      setMessages(prev => [...prev, { role: 'ai', text: aiResponse }]);
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'ai', text: `Error: ${err.message}` }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] min-h-[600px] flex flex-col md:flex-row gap-6 animate-fade-in">
+      {/* Left Sidebar: Files */}
+      <div className="w-full md:w-1/3 flex flex-col gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
+          <NotebookPen size={24} />
+          <h2>เอกสารอ้างอิง</h2>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-2 min-h-[200px]">
+          {files.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 text-center p-4 border-2 border-dashed border-gray-200 rounded-xl">
+              <Files size={48} className="mb-2 opacity-50" />
+              <p>ยังไม่มีเอกสาร</p>
+              <p className="text-xs">อัปโหลด PDF หรือ Text เพื่อเริ่มคุย</p>
+            </div>
+          ) : (
+            files.map((f, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 group">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <FileText size={16} className="text-gray-500 flex-shrink-0" />
+                  <span className="truncate text-sm text-gray-700">{f.name}</span>
+                </div>
+                <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="relative">
+          <input type="file" accept=".pdf,.txt" multiple onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+          <button disabled={isProcessingFiles} className="w-full bg-indigo-50 text-indigo-600 font-medium py-3 rounded-xl hover:bg-indigo-100 transition-colors flex justify-center items-center gap-2 border border-indigo-200">
+            {isProcessingFiles ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span> : <><Upload size={20} /><span>เพิ่มเอกสาร</span></>}
+          </button>
+        </div>
+      </div>
+
+      {/* Right Content: Chat */}
+      <div className="w-full md:w-2/3 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <MessageSquare size={20} className="text-indigo-600" />
+            <span className="font-bold text-gray-700">แชทกับเอกสาร</span>
+          </div>
+          <button onClick={() => setMessages([])} className="text-xs text-gray-400 hover:text-red-500">ล้างแชท</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/30">
+          {messages.length === 0 && (
+            <div className="h-full flex flex-col items-center justify-center text-gray-300">
+              <MessageSquare size={64} className="mb-4 opacity-20" />
+              <p>ถามอะไรก็ได้เกี่ยวกับเอกสารของคุณ</p>
+            </div>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}`}>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
+              </div>
+            </div>
+          ))}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-gray-200 p-4 rounded-2xl rounded-bl-none shadow-sm flex gap-2 items-center">
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="p-4 bg-white border-t border-gray-100">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="พิมพ์คำถามของคุณที่นี่..."
+              className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
+              disabled={isLoading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={isLoading || !input.trim()}
+              className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200"
+            >
+              <Send size={20} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
