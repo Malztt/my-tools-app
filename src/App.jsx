@@ -1149,7 +1149,191 @@ const PdfMerger = () => {
   );
 };
 
+// 10. PDF Splitter (Extract Pages)
+const PdfSplitter = () => {
+  const [file, setFile] = useState(null);
+  const [pages, setPages] = useState([]); // { index, imgData }
+  const [selectedPages, setSelectedPages] = useState(new Set());
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [resultPdf, setResultPdf] = useState(null);
 
+  const handleFileChange = async (e) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const selectedFile = e.target.files[0];
+    setFile(selectedFile);
+    setPages([]);
+    setSelectedPages(new Set());
+    setResultPdf(null);
+    setIsProcessing(true);
+    setStatusMsg('กำลังอ่านไฟล์...');
+
+    try {
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages;
+      const newPages = [];
+
+      for (let i = 1; i <= numPages; i++) {
+        setStatusMsg(`กำลังโหลดหน้า ${i} จาก ${numPages}...`);
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 0.3 }); // Thumbnail scale
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        newPages.push({
+          index: i - 1, // 0-based for pdf-lib
+          pageNumber: i, // 1-based for display
+          imgData: canvas.toDataURL('image/jpeg', 0.8)
+        });
+      }
+
+      setPages(newPages);
+      setStatusMsg('');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const togglePage = (index) => {
+    const newSelected = new Set(selectedPages);
+    if (newSelected.has(index)) {
+      newSelected.delete(index);
+    } else {
+      newSelected.add(index);
+    }
+    setSelectedPages(newSelected);
+  };
+
+  const selectAll = () => {
+    if (selectedPages.size === pages.length) {
+      setSelectedPages(new Set());
+    } else {
+      setSelectedPages(new Set(pages.map(p => p.index)));
+    }
+  };
+
+  const extractPages = async () => {
+    if (selectedPages.size === 0) return;
+    setIsProcessing(true);
+    setStatusMsg('กำลังสร้างไฟล์ใหม่...');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const srcDoc = await PDFDocument.load(arrayBuffer);
+      const newDoc = await PDFDocument.create();
+
+      // Sort selected pages to maintain order
+      const sortedIndices = Array.from(selectedPages).sort((a, b) => a - b);
+      const copiedPages = await newDoc.copyPages(srcDoc, sortedIndices);
+
+      copiedPages.forEach(page => newDoc.addPage(page));
+
+      const pdfBytes = await newDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      setResultPdf(url);
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-bold text-gray-800">แยกไฟล์ PDF (เลือกหน้า)</h2>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        {!file ? (
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+            <input type="file" accept=".pdf" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><Scissors size={32} /></div>
+            <p className="font-medium text-gray-700">อัปโหลดไฟล์ PDF เพื่อแยกหน้า</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="bg-red-100 p-2 rounded-lg text-red-600"><FileType size={20} /></div>
+                <div>
+                  <p className="font-medium text-gray-900">{file.name}</p>
+                  <p className="text-xs text-gray-500">{pages.length} หน้า</p>
+                </div>
+              </div>
+              <button onClick={() => setFile(null)} className="text-gray-400 hover:text-red-500"><X size={20} /></button>
+            </div>
+
+            {isProcessing && !pages.length ? (
+              <div className="text-center py-10">
+                <span className="animate-spin inline-block rounded-full h-8 w-8 border-4 border-indigo-200 border-t-indigo-600 mb-2"></span>
+                <p className="text-gray-500">{statusMsg}</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center">
+                  <p className="text-sm font-medium text-gray-700">เลือกหน้าที่ต้องการแยก ({selectedPages.size})</p>
+                  <button onClick={selectAll} className="text-sm text-indigo-600 hover:underline font-medium">
+                    {selectedPages.size === pages.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2">
+                  {pages.map((page) => (
+                    <div
+                      key={page.index}
+                      onClick={() => togglePage(page.index)}
+                      className={`relative group cursor-pointer border-2 rounded-lg overflow-hidden transition-all ${selectedPages.has(page.index) ? 'border-indigo-600 ring-2 ring-indigo-100' : 'border-gray-200 hover:border-indigo-300'}`}
+                    >
+                      <div className="aspect-[3/4] bg-gray-100 relative">
+                        <img src={page.imgData} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
+                        <div className={`absolute inset-0 transition-colors ${selectedPages.has(page.index) ? 'bg-indigo-600/10' : 'group-hover:bg-black/5'}`} />
+                      </div>
+                      <div className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all ${selectedPages.has(page.index) ? 'bg-indigo-600 text-white scale-100' : 'bg-gray-200 text-transparent scale-90 group-hover:scale-100'}`}>
+                        <Check size={14} />
+                      </div>
+                      <div className="absolute bottom-0 inset-x-0 bg-white/90 text-center py-1 text-xs font-medium text-gray-600 border-t border-gray-100">
+                        หน้า {page.pageNumber}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={extractPages}
+                  disabled={isProcessing || selectedPages.size === 0}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Scissors size={20} /><span>แยกไฟล์ PDF (สร้างไฟล์ใหม่)</span></>}
+                </button>
+
+                {resultPdf && (
+                  <div className="space-y-4 animate-fade-in">
+                    <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
+                      <Check size={20} /> <span>เรียบร้อย!</span>
+                    </div>
+                    <a href={resultPdf} download={`split-${file.name}`} className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลดไฟล์ใหม่</a>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // --- Main Layout ---
 const App = () => {
@@ -1159,6 +1343,7 @@ const App = () => {
     // PDF & Image Tools
     { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType, category: 'PDF & รูปภาพ' },
     { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files, category: 'PDF & รูปภาพ' },
+    { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors, category: 'PDF & รูปภาพ' },
     { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2, category: 'PDF & รูปภาพ' },
     { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage, category: 'PDF & รูปภาพ' },
     { id: 'ocr', label: 'ดึงข้อความจากไฟล์', icon: Zap, category: 'PDF & รูปภาพ' },
@@ -1214,6 +1399,7 @@ const App = () => {
             {activeTab === 'ocsc' && <OcscSearch />}
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
+            {activeTab === 'pdf_split' && <PdfSplitter />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
           </div>
         </div>
