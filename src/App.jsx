@@ -32,6 +32,7 @@ const formatSize = (bytes) => {
 // --- Components ---
 
 // 1. REAL URL Shortener (Multi-Provider)
+// 1. REAL URL Shortener (Multi-Provider)
 const UrlShortener = () => {
   const [url, setUrl] = useState('');
   const [shortUrl, setShortUrl] = useState('');
@@ -39,95 +40,31 @@ const UrlShortener = () => {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [provider, setProvider] = useState('tinyurl');
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
   const providers = {
-    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)', requireKey: false },
-    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', requireKey: false },
-    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', requireKey: false },
-    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)', requireKey: false },
-    bitly: { name: 'Bitly', url: 'https://api-ssl.bitly.com/v4/shorten', limit: '1,000/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://app.bitly.com/settings/api/' },
-    cuttly: { name: 'Cutt.ly', url: 'https://cutt.ly/api/api.php', limit: '300/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://cutt.ly/edit_account' },
-    rebrandly: { name: 'Rebrandly', url: 'https://api.rebrandly.com/v1/links', limit: '500/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://app.rebrandly.com/account/api-keys' },
-  };
-
-  // Load API Key when provider changes
-  useEffect(() => {
-    if (providers[provider].requireKey) {
-      const savedKey = localStorage.getItem(`api_key_${provider}`);
-      if (savedKey) setApiKey(savedKey);
-      else setApiKey('');
-      setShowApiKeyInput(true);
-    } else {
-      setShowApiKeyInput(false);
-    }
-  }, [provider]);
-
-  const saveApiKey = () => {
-    localStorage.setItem(`api_key_${provider}`, apiKey);
-    alert(`บันทึก API Key ของ ${providers[provider].name} แล้ว!`);
+    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)' },
+    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
+    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
+    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)' },
   };
 
   const handleShorten = async (e) => {
     e.preventDefault();
     if (!url) return;
-    if (providers[provider].requireKey && !apiKey) {
-      setError(`กรุณาใส่ API Key สำหรับ ${providers[provider].name}`);
-      return;
-    }
-
     setLoading(true);
     setError('');
     setShortUrl('');
 
     try {
-      let result = '';
-      const currentProvider = providers[provider];
+      const targetUrl = providers[provider].url + encodeURIComponent(url);
+      const response = await fetch(targetUrl);
 
-      if (provider === 'bitly') {
-        const response = await fetch(currentProvider.url, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ long_url: url, domain: "bit.ly" })
-        });
-        if (!response.ok) throw new Error(`Bitly Error: ${response.status}`);
-        const data = await response.json();
-        result = data.link;
-      } else if (provider === 'cuttly') {
-        // Cutt.ly uses GET with key param
-        const response = await fetch(`${currentProvider.url}?key=${apiKey}&short=${encodeURIComponent(url)}`);
-        if (!response.ok) throw new Error(`Cutt.ly Error: ${response.status}`);
-        const data = await response.json();
-        if (data.url.status === 7) result = data.url.shortLink;
-        else throw new Error(`Cutt.ly Status: ${data.url.status}`);
-      } else if (provider === 'rebrandly') {
-        const response = await fetch(currentProvider.url, {
-          method: 'POST',
-          headers: {
-            'apikey': apiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ destination: url })
-        });
-        if (!response.ok) throw new Error(`Rebrandly Error: ${response.status}`);
-        const data = await response.json();
-        result = `https://${data.shortUrl}`;
-      } else {
-        // Free providers (GET)
-        const targetUrl = currentProvider.url + encodeURIComponent(url);
-        const response = await fetch(targetUrl);
-        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-        result = await response.text();
-      }
-
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      const result = await response.text();
       setShortUrl(result);
     } catch (err) {
       console.error(err);
-      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): ${err.message}`);
+      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): อาจติดปัญหา CORS หรือลิงก์ผิด`);
     } finally {
       setLoading(false);
     }
