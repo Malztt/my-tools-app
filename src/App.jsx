@@ -43,9 +43,9 @@ const UrlShortener = () => {
 
   const providers = {
     tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)' },
-    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
-    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
-    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)' },
+    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', useProxy: true },
+    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', useProxy: true },
+    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)', useProxy: true },
   };
 
   const handleShorten = async (e) => {
@@ -56,7 +56,13 @@ const UrlShortener = () => {
     setShortUrl('');
 
     try {
-      const targetUrl = providers[provider].url + encodeURIComponent(url);
+      let targetUrl = providers[provider].url + encodeURIComponent(url);
+
+      // Use proxy if required by provider
+      if (providers[provider].useProxy) {
+        targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+      }
+
       const response = await fetch(targetUrl);
 
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
