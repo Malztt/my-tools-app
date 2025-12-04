@@ -31,13 +31,21 @@ const formatSize = (bytes) => {
 
 // --- Components ---
 
-// 1. REAL URL Shortener (Using TinyURL API)
+// 1. REAL URL Shortener (Multi-Provider)
 const UrlShortener = () => {
   const [url, setUrl] = useState('');
   const [shortUrl, setShortUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
+  const [provider, setProvider] = useState('tinyurl');
+
+  const providers = {
+    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)' },
+    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
+    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
+    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)' },
+  };
 
   const handleShorten = async (e) => {
     e.preventDefault();
@@ -47,13 +55,20 @@ const UrlShortener = () => {
     setShortUrl('');
 
     try {
-      const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
-      if (!response.ok) throw new Error('Network response was not ok');
+      // Use a CORS proxy if needed, but these APIs often allow CORS or are simple enough.
+      // Note: clck.ru might have strict CORS. If it fails, we might need a proxy or backend.
+      // For client-side only, TinyURL is best. Is.gd/v.gd might block client-side fetch due to CORS.
+      // Let's try direct fetch first. If CORS fails, we'll catch it.
+
+      const targetUrl = providers[provider].url + encodeURIComponent(url);
+      const response = await fetch(targetUrl);
+
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       const result = await response.text();
       setShortUrl(result);
     } catch (err) {
       console.error(err);
-      setError('ไม่สามารถย่อลิงก์ได้ (อาจติดปัญหา CORS หรือลิงก์ไม่ถูกต้อง)');
+      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): อาจติดปัญหา CORS หรือลิงก์ผิด`);
     } finally {
       setLoading(false);
     }
@@ -68,11 +83,27 @@ const UrlShortener = () => {
   return (
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์ (ใช้งานจริง)</h2>
+        <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์ (Multi-Provider)</h2>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <form onSubmit={handleShorten} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">เลือกผู้ให้บริการ</label>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="w-full p-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
+            >
+              {Object.entries(providers).map(([key, data]) => (
+                <option key={key} value={key}>{data.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1 ml-1">
+              <span className="font-semibold">ข้อจำกัด:</span> {providers[provider].limit}
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">URL ปลายทาง</label>
             <div className="relative">
