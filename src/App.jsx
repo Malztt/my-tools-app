@@ -39,36 +39,95 @@ const UrlShortener = () => {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [provider, setProvider] = useState('tinyurl');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
   const providers = {
-    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)' },
-    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
-    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)' },
-    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)' },
+    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)', requireKey: false },
+    isgd: { name: 'Is.gd', url: 'https://is.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', requireKey: false },
+    vgd: { name: 'v.gd', url: 'https://v.gd/create.php?format=simple&url=', limit: '50 ครั้ง/วัน (ต่อ IP)', requireKey: false },
+    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)', requireKey: false },
+    bitly: { name: 'Bitly', url: 'https://api-ssl.bitly.com/v4/shorten', limit: '1,000/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://app.bitly.com/settings/api/' },
+    cuttly: { name: 'Cutt.ly', url: 'https://cutt.ly/api/api.php', limit: '300/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://cutt.ly/edit_account' },
+    rebrandly: { name: 'Rebrandly', url: 'https://api.rebrandly.com/v1/links', limit: '500/เดือน (Free Tier)', requireKey: true, getKeyUrl: 'https://app.rebrandly.com/account/api-keys' },
+  };
+
+  // Load API Key when provider changes
+  useEffect(() => {
+    if (providers[provider].requireKey) {
+      const savedKey = localStorage.getItem(`api_key_${provider}`);
+      if (savedKey) setApiKey(savedKey);
+      else setApiKey('');
+      setShowApiKeyInput(true);
+    } else {
+      setShowApiKeyInput(false);
+    }
+  }, [provider]);
+
+  const saveApiKey = () => {
+    localStorage.setItem(`api_key_${provider}`, apiKey);
+    alert(`บันทึก API Key ของ ${providers[provider].name} แล้ว!`);
   };
 
   const handleShorten = async (e) => {
     e.preventDefault();
     if (!url) return;
+    if (providers[provider].requireKey && !apiKey) {
+      setError(`กรุณาใส่ API Key สำหรับ ${providers[provider].name}`);
+      return;
+    }
+
     setLoading(true);
     setError('');
     setShortUrl('');
 
     try {
-      // Use a CORS proxy if needed, but these APIs often allow CORS or are simple enough.
-      // Note: clck.ru might have strict CORS. If it fails, we might need a proxy or backend.
-      // For client-side only, TinyURL is best. Is.gd/v.gd might block client-side fetch due to CORS.
-      // Let's try direct fetch first. If CORS fails, we'll catch it.
+      let result = '';
+      const currentProvider = providers[provider];
 
-      const targetUrl = providers[provider].url + encodeURIComponent(url);
-      const response = await fetch(targetUrl);
+      if (provider === 'bitly') {
+        const response = await fetch(currentProvider.url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ long_url: url, domain: "bit.ly" })
+        });
+        if (!response.ok) throw new Error(`Bitly Error: ${response.status}`);
+        const data = await response.json();
+        result = data.link;
+      } else if (provider === 'cuttly') {
+        // Cutt.ly uses GET with key param
+        const response = await fetch(`${currentProvider.url}?key=${apiKey}&short=${encodeURIComponent(url)}`);
+        if (!response.ok) throw new Error(`Cutt.ly Error: ${response.status}`);
+        const data = await response.json();
+        if (data.url.status === 7) result = data.url.shortLink;
+        else throw new Error(`Cutt.ly Status: ${data.url.status}`);
+      } else if (provider === 'rebrandly') {
+        const response = await fetch(currentProvider.url, {
+          method: 'POST',
+          headers: {
+            'apikey': apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ destination: url })
+        });
+        if (!response.ok) throw new Error(`Rebrandly Error: ${response.status}`);
+        const data = await response.json();
+        result = `https://${data.shortUrl}`;
+      } else {
+        // Free providers (GET)
+        const targetUrl = currentProvider.url + encodeURIComponent(url);
+        const response = await fetch(targetUrl);
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+        result = await response.text();
+      }
 
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      const result = await response.text();
       setShortUrl(result);
     } catch (err) {
       console.error(err);
-      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): อาจติดปัญหา CORS หรือลิงก์ผิด`);
+      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -83,7 +142,7 @@ const UrlShortener = () => {
   return (
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์ (Multi-Provider)</h2>
+        <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์</h2>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -96,13 +155,36 @@ const UrlShortener = () => {
               className="w-full p-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
             >
               {Object.entries(providers).map(([key, data]) => (
-                <option key={key} value={key}>{data.name}</option>
+                <option key={key} value={key}>{data.name} {data.requireKey ? '(API Key)' : '(Free)'}</option>
               ))}
             </select>
             <p className="text-xs text-gray-500 mt-1 ml-1">
               <span className="font-semibold">ข้อจำกัด:</span> {providers[provider].limit}
             </p>
           </div>
+
+          {showApiKeyInput && (
+            <div className="animate-fade-in">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                API Key สำหรับ {providers[provider].name}
+                <a href={providers[provider].getKeyUrl} target="_blank" rel="noreferrer" className="ml-2 text-indigo-600 text-xs underline flex-inline items-center gap-1"><ExternalLink size={10} /> รับ Key ที่นี่</a>
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder={`วาง API Key ของ ${providers[provider].name} ที่นี่`}
+                    className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                  />
+                  <div className="absolute right-3 top-3 text-gray-400"><Key size={20} /></div>
+                </div>
+                <button type="button" onClick={saveApiKey} className="bg-gray-100 text-gray-600 px-4 rounded-xl hover:bg-gray-200 transition-colors font-medium text-sm">บันทึก</button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1 ml-1">*บันทึกไว้ในเครื่องของคุณเท่านั้น (LocalStorage)</p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">URL ปลายทาง</label>
