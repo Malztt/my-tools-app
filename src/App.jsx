@@ -80,6 +80,7 @@ const UrlShortener = () => {
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์</h2>
+        <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.5.2</span>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -100,28 +101,7 @@ const UrlShortener = () => {
             </p>
           </div>
 
-          {showApiKeyInput && (
-            <div className="animate-fade-in">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                API Key สำหรับ {providers[provider].name}
-                <a href={providers[provider].getKeyUrl} target="_blank" rel="noreferrer" className="ml-2 text-indigo-600 text-xs underline flex-inline items-center gap-1"><ExternalLink size={10} /> รับ Key ที่นี่</a>
-              </label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={`วาง API Key ของ ${providers[provider].name} ที่นี่`}
-                    className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
-                  />
-                  <div className="absolute right-3 top-3 text-gray-400"><Key size={20} /></div>
-                </div>
-                <button type="button" onClick={saveApiKey} className="bg-gray-100 text-gray-600 px-4 rounded-xl hover:bg-gray-200 transition-colors font-medium text-sm">บันทึก</button>
-              </div>
-              <p className="text-xs text-gray-400 mt-1 ml-1">*บันทึกไว้ในเครื่องของคุณเท่านั้น (LocalStorage)</p>
-            </div>
-          )}
+
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">URL ปลายทาง</label>
