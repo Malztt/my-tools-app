@@ -514,8 +514,7 @@ const QRCodeGenerator = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-3xl font-bold text-gray-800">สร้าง QR Code สไตล์โปร</h2>
-        <p className="text-gray-500">ปรับแต่ง QR Code ได้ดั่งใจ เหมือนQRCode Monkey</p>
+        <h2 className="text-3xl font-bold text-gray-800">สร้าง QR Code</h2>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
