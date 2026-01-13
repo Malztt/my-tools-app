@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
+import QRCodeStyling from 'qr-code-styling';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
@@ -384,14 +385,74 @@ const PdfOptimizer = () => {
   );
 };
 
-// 4. QR Code Generator (with Logo)
+// 4. Advanced QR Code Generator (QRCode Monkey Style)
 const QRCodeGenerator = () => {
-  const [text, setText] = useState('https://example.com');
+  const [url, setUrl] = useState('https://example.com');
+  const [fileExt, setFileExt] = useState('png');
+  const [qrCode] = useState(new QRCodeStyling({
+    width: 300,
+    height: 300,
+    type: 'svg',
+    data: 'https://example.com',
+    image: null,
+    dotsOptions: { color: '#000000', type: 'square' },
+    backgroundOptions: { color: '#ffffff' },
+    imageOptions: { crossOrigin: 'anonymous', margin: 10 }
+  }));
+  const ref = useRef(null);
+
+  // Customization States
+  const [activeTab, setActiveTab] = useState('content'); // content, colors, logo, design
+  const [size, setSize] = useState(1024);
+
+  // Design Options
+  const [shape, setShape] = useState('square'); // NEW: square, circle
+  const [dotType, setDotType] = useState('square');
+  const [cornerSquareType, setCornerSquareType] = useState('square');
+  const [cornerDotType, setCornerDotType] = useState('square');
+
+  // Color Options
+  const [bgColor, setBgColor] = useState('#ffffff');
+  const [fgType, setFgType] = useState('single'); // single, gradient
+  const [fgColor, setFgColor] = useState('#000000');
+  const [gradientColor1, setGradientColor1] = useState('#000000');
+  const [gradientColor2, setGradientColor2] = useState('#0000ff');
+  const [gradientType, setGradientType] = useState('linear');
+  const [rotation, setRotation] = useState(0);
+
+  // Logo Options
   const [logo, setLogo] = useState(null);
-  const [logoSize, setLogoSize] = useState(60); // Default logo size
-  const [color, setColor] = useState('#000000');
-  const [size, setSize] = useState(1024); // Default to high resolution
-  const qrRef = useRef(null);
+  const [logoSize, setLogoSize] = useState(0.4);
+  const [logoMargin, setLogoMargin] = useState(10);
+
+  useEffect(() => {
+    if (ref.current) {
+      qrCode.append(ref.current);
+    }
+  }, [qrCode, ref]);
+
+  useEffect(() => {
+    const dotsOptions = {
+      type: dotType,
+      color: fgType === 'single' ? fgColor : undefined,
+      gradient: fgType === 'gradient' ? {
+        type: gradientType,
+        rotation: rotation * (Math.PI / 180),
+        colorStops: [{ offset: 0, color: gradientColor1 }, { offset: 1, color: gradientColor2 }]
+      } : undefined
+    };
+
+    qrCode.update({
+      shape: shape, // NEW
+      data: url,
+      image: logo,
+      dotsOptions: dotsOptions,
+      backgroundOptions: { color: bgColor },
+      cornersSquareOptions: { type: cornerSquareType, color: fgType === 'single' ? fgColor : gradientColor1 },
+      cornersDotOptions: { type: cornerDotType, color: fgType === 'single' ? fgColor : gradientColor1 },
+      imageOptions: { imageSize: logoSize, margin: logoMargin }
+    });
+  }, [url, logo, shape, dotType, cornerSquareType, cornerDotType, bgColor, fgType, fgColor, gradientColor1, gradientColor2, gradientType, rotation, logoSize, logoMargin]);
 
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
@@ -402,122 +463,354 @@ const QRCodeGenerator = () => {
     }
   };
 
-  const downloadQR = () => {
-    const canvas = qrRef.current.querySelector('canvas');
-    if (canvas) {
-      const url = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'qrcode-with-logo.png';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  const onDownloadClick = () => {
+    // 1. Update to high resolution
+    qrCode.update({
+      width: size,
+      height: size
+    });
+
+    // 2. Wait for render (short delay to ensuring simple race condition fix)
+    setTimeout(() => {
+      // 3. Simple Download (PNG only as requested)
+      qrCode.download({
+        extension: 'png',
+        name: 'my-qrcode.png'
+      });
+
+      // 4. Revert preview size after download triggered
+      setTimeout(() => {
+        qrCode.update({ width: 300, height: 300 });
+      }, 500);
+    }, 100);
+  };
+
+  // Helper to render shape preview
+  const renderShapePreview = (type, isFrame = false) => {
+    const commonClass = "bg-gray-800";
+    if (isFrame) {
+      switch (type) {
+        case 'square': return <div className="w-5 h-5 border-2 border-gray-800"></div>;
+        case 'dots': return <div className="w-5 h-5 border-2 border-gray-800 rounded-full"></div>; // 'dots' as frame is usually circle
+        case 'rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-md"></div>;
+        case 'extra-rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-lg"></div>;
+        case 'classy': return <div className="w-5 h-5 border-2 border-gray-800 rounded-tr-lg rounded-bl-lg"></div>;
+        case 'classy-rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-tr-lg rounded-bl-lg rounded-tl-sm rounded-br-sm"></div>;
+        default: return <div className="w-5 h-5 border-2 border-gray-800"></div>;
+      }
+    } else {
+      switch (type) {
+        case 'square': return <div className={`w-4 h-4 ${commonClass}`}></div>;
+        case 'dots': return <div className={`w-4 h-4 ${commonClass} rounded-full`}></div>;
+        case 'rounded': return <div className={`w-4 h-4 ${commonClass} rounded-md`}></div>;
+        case 'extra-rounded': return <div className={`w-4 h-4 ${commonClass} rounded-lg`}></div>;
+        case 'classy': return <div className={`w-4 h-4 ${commonClass} rounded-tr-lg rounded-bl-lg`}></div>;
+        case 'classy-rounded': return <div className={`w-4 h-4 ${commonClass} rounded-tr-lg rounded-bl-lg rounded-tl-sm rounded-br-sm`}></div>;
+        default: return <div className={`w-4 h-4 ${commonClass}`}></div>;
+      }
     }
   };
 
   return (
-    <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
+    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">สร้าง QR Code (ใส่โลโก้ได้)</h2>
+        <h2 className="text-3xl font-bold text-gray-800">สร้าง QR Code สไตล์โปร</h2>
+        <p className="text-gray-500">ปรับแต่ง QR Code ได้ดั่งใจ เหมือนQRCode Monkey</p>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">ข้อความ / ลิงก์</label>
-          <textarea
-            rows="2"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="กรอกข้อความที่นี่..."
-            className="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-200 outline-none resize-none"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">สี QR Code</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              className="h-11 w-16 p-1 rounded-lg border border-gray-200 cursor-pointer bg-white"
-            />
-            <input
-              type="text"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              placeholder="#000000"
-              className="flex-1 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-200 outline-none uppercase font-mono"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">โลโก้ตรงกลาง (ถ้ามี)</label>
-          <div className="flex items-center gap-4">
-            <div className="relative overflow-hidden bg-gray-50 border border-gray-200 rounded-lg w-full">
-              <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
-              <div className="p-3 text-center text-sm text-gray-500 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2">
-                <Upload size={16} /> {logo ? 'เปลี่ยนรูปโลโก้' : 'อัปโหลดรูปโลโก้'}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Left Control Panel */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            {/* Tabs */}
+            <div className="flex border-b border-gray-100 overflow-x-auto">
+              <button onClick={() => setActiveTab('content')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'content' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>1. เนื้อหา</button>
+              <button onClick={() => setActiveTab('colors')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'colors' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>2. สี</button>
+              <button onClick={() => setActiveTab('logo')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'logo' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>3. โลโก้</button>
+              <button onClick={() => setActiveTab('design')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'design' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>4. ดีไซน์</button>
             </div>
-            {logo && <button onClick={() => setLogo(null)} className="text-red-500 hover:text-red-700 p-2"><X size={20} /></button>}
+
+            <div className="p-6 min-h-[400px]">
+              {/* Tab 1: Content */}
+              {activeTab === 'content' && (
+                <div className="space-y-4 animate-fade-in">
+                  <label className="block text-sm font-medium text-gray-700">URL เว็บไซต์</label>
+                  <div className="relative">
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      placeholder="https://www.example.com"
+                      className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                    />
+                    <div className="absolute right-3 top-3 text-gray-400"><Link size={20} /></div>
+                  </div>
+                  <p className="text-xs text-gray-500">กรอกลิงก์ที่คุณต้องการให้สแกนแล้วเปิด</p>
+                </div>
+              )}
+
+              {/* Tab 2: Colors */}
+              {activeTab === 'colors' && (
+                <div className="space-y-6 animate-fade-in">
+
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-gray-700">สีพื้นหลัง (Background)</label>
+                    <div className="flex items-center gap-3">
+                      <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-10 w-16 p-1 rounded border cursor-pointer" />
+                      <input
+                        type="text"
+                        value={bgColor}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        placeholder="#FFFFFF"
+                        className="flex-1 p-2 rounded border border-gray-200 outline-none uppercase font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <hr className="border-gray-100" />
+
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-gray-700">สีของ QR Code (Foreground)</label>
+                    <div className="flex gap-4 mb-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="fgType" checked={fgType === 'single'} onChange={() => setFgType('single')} className="text-indigo-600 focus:ring-indigo-500" />
+                        <span className="text-sm">สีเดียว</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="fgType" checked={fgType === 'gradient'} onChange={() => setFgType('gradient')} className="text-indigo-600 focus:ring-indigo-500" />
+                        <span className="text-sm">ไล่สี (Gradient)</span>
+                      </label>
+                    </div>
+
+                    {fgType === 'single' ? (
+                      <div className="flex items-center gap-3">
+                        <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="h-10 w-16 p-1 rounded border cursor-pointer" />
+                        <input
+                          type="text"
+                          value={fgColor}
+                          onChange={(e) => setFgColor(e.target.value)}
+                          placeholder="#000000"
+                          className="flex-1 p-2 rounded border border-gray-200 outline-none uppercase font-mono text-sm"
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex gap-4">
+                          <div className="flex-1">
+                            <span className="text-xs text-gray-500 block mb-1">สีเริ่ม</span>
+                            <div className="flex items-center gap-2">
+                              <input type="color" value={gradientColor1} onChange={(e) => setGradientColor1(e.target.value)} className="h-10 w-12 p-1 rounded border cursor-pointer" />
+                              <input
+                                type="text"
+                                value={gradientColor1}
+                                onChange={(e) => setGradientColor1(e.target.value)}
+                                className="w-full p-2 rounded border border-gray-200 outline-none uppercase font-mono text-xs"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-xs text-gray-500 block mb-1">สีจบ</span>
+                            <div className="flex items-center gap-2">
+                              <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="h-10 w-12 p-1 rounded border cursor-pointer" />
+                              <input
+                                type="text"
+                                value={gradientColor2}
+                                onChange={(e) => setGradientColor2(e.target.value)}
+                                className="w-full p-2 rounded border border-gray-200 outline-none uppercase font-mono text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-4">
+                          <select value={gradientType} onChange={(e) => setGradientType(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+                            <option value="linear">Linear (เส้นตรง)</option>
+                            <option value="radial">Radial (วงกลม)</option>
+                          </select>
+                          <div className="flex items-center gap-2 flex-1">
+                            <span className="text-xs text-gray-500">ทิศทาง: {rotation}°</span>
+                            <input type="range" min="0" max="360" value={rotation} onChange={(e) => setRotation(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 3: Logo */}
+              {activeTab === 'logo' && (
+                <div className="space-y-6 animate-fade-in">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">อัปโหลดโลโก้</label>
+                    <div className="relative overflow-hidden bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl w-full p-6 text-center hover:bg-gray-100 transition-all cursor-pointer">
+                      <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Upload size={32} className="text-gray-400" />
+                        <span className="text-gray-600">{logo ? 'เปลี่ยนรูปโลโก้' : 'คลิกเพื่อเลือกไฟล์รูปภาพ'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {logo && (
+                    <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-xl">
+                      <img src={logo} className="w-16 h-16 object-contain bg-white rounded shadow-sm" />
+                      <div className="flex-1 space-y-4">
+                        <button onClick={() => setLogo(null)} className="text-red-500 text-sm hover:underline">ลบโลโก้</button>
+
+                        {/* Logo Size and Margin */}
+                        <div>
+                          <label className="text-xs font-medium text-gray-700 block mb-1">ขนาดโลโก้</label>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="1.0"
+                            step="0.05"
+                            value={logoSize}
+                            onChange={(e) => setLogoSize(Number(e.target.value))}
+                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-700 block mb-1">ระยะห่างรอบโลโก้</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="50"
+                            step="1"
+                            value={logoMargin}
+                            onChange={(e) => setLogoMargin(Number(e.target.value))}
+                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+                        </div>
+
+                      </div>
+                    </div>
+                  )}
+                  {!logo && <p className="text-center text-sm text-gray-400">ยังไม่ได้เลือกรูปภาพ</p>}
+                </div>
+              )}
+
+              {/* Tab 4: Design */}
+              {activeTab === 'design' && (
+                <div className="space-y-6 animate-fade-in content-center">
+
+                  {/* Overall Shape */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-3">รูปทรง QR Code (Shape)</label>
+                    <div className="grid grid-cols-2 gap-4">
+                      {['square', 'circle'].map(type => (
+                        <button
+                          key={type}
+                          onClick={() => setShape(type)}
+                          className={`py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-medium transition-all ${shape === type ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          <div className={`w-5 h-5 bg-current ${type === 'circle' ? 'rounded-full' : 'rounded-sm'}`}></div>
+                          <span className="capitalize">{type}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <hr className="border-gray-100" />
+
+                  {/* Body Shape */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-3">รูปทรงจุด (Body Shape)</label>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {['square', 'dots', 'rounded', 'extra-rounded', 'classy', 'classy-rounded'].map(type => (
+                        <button
+                          key={type}
+                          onClick={() => setDotType(type)}
+                          className={`aspect-square rounded border-2 p-2 flex flex-col items-center justify-center gap-1 hover:bg-gray-50 transition-all ${dotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
+                          title={type}
+                        >
+                          {renderShapePreview(type, false)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <hr className="border-gray-100" />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Eye Frame */}
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 block mb-3">กรอบตา (Eye Frame)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {['square', 'dot', 'extra-rounded'].map(type => (
+                          <button
+                            key={type}
+                            onClick={() => setCornerSquareType(type)}
+                            className={`aspect-square rounded border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${cornerSquareType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
+                            title={type}
+                          >
+                            {renderShapePreview(type, true)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Eye Ball */}
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 block mb-3">ลูกตา (Eye Ball)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {['square', 'dots', 'rounded', 'extra-rounded', 'classy', 'classy-rounded'].map(type => (
+                          <button
+                            key={type}
+                            onClick={() => setCornerDotType(type)}
+                            className={`aspect-square rounded border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${cornerDotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
+                            title={type}
+                          >
+                            {renderShapePreview(type, false)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {logo && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">ขนาดโลโก้: {logoSize}px</label>
-            <input
-              type="range"
-              min="20"
-              max="100"
-              value={logoSize}
-              onChange={(e) => setLogoSize(Number(e.target.value))}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-            />
-          </div>
-        )}
+        {/* Right Preview Panel */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 sticky top-6">
+            <div className="flex justify-center mb-6">
+              <div ref={ref} className="bg-white p-4 rounded-xl shadow-inner border border-gray-100" />
+            </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">ความละเอียด (Resolution): {size}px</label>
-          <input
-            type="range"
-            min="128"
-            max="4096"
-            step="128"
-            value={size}
-            onChange={(e) => setSize(Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-          />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>เล็ก (128px)</span>
-            <span>ปกติ (1024px)</span>
-            <span>ชัดมาก (4096px)</span>
-          </div>
-        </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">ความละเอียด (Resolution): {size}px</label>
+                <input
+                  type="range"
+                  min="200"
+                  max="2000"
+                  step="100"
+                  value={size}
+                  onChange={(e) => setSize(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>200px</span>
+                  <span>1000px</span>
+                  <span>2000px</span>
+                </div>
+              </div>
 
-        <div className="flex flex-col items-center space-y-6 pt-4 border-t border-gray-100">
-          <div ref={qrRef} className="p-4 bg-white border-2 border-indigo-100 rounded-xl shadow-sm max-w-full overflow-hidden flex justify-center">
-            <QRCodeCanvas
-              value={text}
-              size={size}
-              fgColor={color}
-              level={"H"} // High error correction for logos
-              style={{ maxWidth: '100%', height: 'auto' }}
-              imageSettings={logo ? {
-                src: logo,
-                x: undefined,
-                y: undefined,
-                height: logoSize,
-                width: logoSize,
-                excavate: true,
-              } : undefined}
-            />
+              <div className="flex gap-2">
+                <button onClick={() => setFileExt('png')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'png' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>PNG</button>
+                <button onClick={() => setFileExt('jpeg')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'jpeg' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>JPEG</button>
+                <button onClick={() => setFileExt('svg')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'svg' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>SVG</button>
+              </div>
+
+              <button onClick={onDownloadClick} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2">
+                <Download size={20} /> ดาวน์โหลด QR Code
+              </button>
+            </div>
           </div>
-          <button onClick={downloadQR} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl flex justify-center items-center gap-2 transition-all shadow-lg shadow-indigo-200">
-            <Download size={20} /> บันทึก QR Code
-          </button>
         </div>
       </div>
     </div>
