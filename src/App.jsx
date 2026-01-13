@@ -390,6 +390,7 @@ const QRCodeGenerator = () => {
   const [logo, setLogo] = useState(null);
   const [logoSize, setLogoSize] = useState(60); // Default logo size
   const [color, setColor] = useState('#000000');
+  const [size, setSize] = useState(1024); // Default to high resolution
   const qrRef = useRef(null);
 
   const handleLogoUpload = (e) => {
@@ -478,13 +479,32 @@ const QRCodeGenerator = () => {
           </div>
         )}
 
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">ความละเอียด (Resolution): {size}px</label>
+          <input
+            type="range"
+            min="128"
+            max="4096"
+            step="128"
+            value={size}
+            onChange={(e) => setSize(Number(e.target.value))}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+          />
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>เล็ก (128px)</span>
+            <span>ปกติ (1024px)</span>
+            <span>ชัดมาก (4096px)</span>
+          </div>
+        </div>
+
         <div className="flex flex-col items-center space-y-6 pt-4 border-t border-gray-100">
-          <div ref={qrRef} className="p-4 bg-white border-2 border-indigo-100 rounded-xl shadow-sm">
+          <div ref={qrRef} className="p-4 bg-white border-2 border-indigo-100 rounded-xl shadow-sm max-w-full overflow-hidden flex justify-center">
             <QRCodeCanvas
               value={text}
-              size={256}
+              size={size}
               fgColor={color}
               level={"H"} // High error correction for logos
+              style={{ maxWidth: '100%', height: 'auto' }}
               imageSettings={logo ? {
                 src: logo,
                 x: undefined,
