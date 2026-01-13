@@ -389,6 +389,7 @@ const QRCodeGenerator = () => {
   const [text, setText] = useState('https://example.com');
   const [logo, setLogo] = useState(null);
   const [logoSize, setLogoSize] = useState(60); // Default logo size
+  const [color, setColor] = useState('#000000');
   const qrRef = useRef(null);
 
   const handleLogoUpload = (e) => {
@@ -432,6 +433,25 @@ const QRCodeGenerator = () => {
         </div>
 
         <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">สี QR Code</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="h-11 w-16 p-1 rounded-lg border border-gray-200 cursor-pointer bg-white"
+            />
+            <input
+              type="text"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              placeholder="#000000"
+              className="flex-1 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-200 outline-none uppercase font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
           <label className="text-sm font-medium text-gray-700">โลโก้ตรงกลาง (ถ้ามี)</label>
           <div className="flex items-center gap-4">
             <div className="relative overflow-hidden bg-gray-50 border border-gray-200 rounded-lg w-full">
@@ -463,6 +483,7 @@ const QRCodeGenerator = () => {
             <QRCodeCanvas
               value={text}
               size={256}
+              fgColor={color}
               level={"H"} // High error correction for logos
               imageSettings={logo ? {
                 src: logo,
