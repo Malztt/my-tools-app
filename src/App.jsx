@@ -472,10 +472,10 @@ const QRCodeGenerator = () => {
 
     // 2. Wait for render (short delay to ensuring simple race condition fix)
     setTimeout(() => {
-      // 3. Simple Download (PNG only as requested)
+      // 3. Download using selected extension
       qrCode.download({
-        extension: 'png',
-        name: 'my-qrcode.png'
+        extension: fileExt,
+        name: `my-qrcode.${fileExt}`
       });
 
       // 4. Revert preview size after download triggered
