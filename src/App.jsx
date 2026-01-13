@@ -475,7 +475,7 @@ const QRCodeGenerator = () => {
       // 3. Download using selected extension
       qrCode.download({
         extension: fileExt,
-        name: `my-qrcode.${fileExt}`
+        name: 'my-qrcode'
       });
 
       // 4. Revert preview size after download triggered
