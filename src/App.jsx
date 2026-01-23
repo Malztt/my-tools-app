@@ -1219,9 +1219,9 @@ const ExcelConverter = () => {
 
       if (mode === 'split_sheets') {
         try {
-          const XLSX = await import('xlsx');
+          const XLSX = (await import('xlsx-js-style')).default;
           const data = await f.arrayBuffer();
-          const workbook = XLSX.read(data);
+          const workbook = XLSX.read(data, { cellStyles: true });
           setWb(workbook);
           setSheets(workbook.SheetNames.map(name => ({
             originalName: name,
@@ -1254,11 +1254,11 @@ const ExcelConverter = () => {
     setStatusMsg('กำลังประมวลผล...');
 
     try {
-      const XLSX = await import('xlsx');
+      const XLSX = (await import('xlsx-js-style')).default;
 
       if (mode === 'xls_to_csv') {
         const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer);
+        const workbook = XLSX.read(arrayBuffer, { cellStyles: true });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         const csv = XLSX.utils.sheet_to_csv(worksheet);
@@ -1269,7 +1269,7 @@ const ExcelConverter = () => {
       } else if (mode === 'csv_to_xls') {
         const text = await file.text();
         const wb = XLSX.read(text, { type: 'string', raw: true });
-        const xlsxBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const xlsxBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
         const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".xlsx" });
@@ -1283,11 +1283,9 @@ const ExcelConverter = () => {
           const s = selectedSheets[0];
           const newWb = XLSX.utils.book_new();
           const ws = wb.Sheets[s.originalName];
-          XLSX.utils.book_append_sheet(newWb, ws, s.originalName); // Keep original sheet name inside potentially? Or newName? Usually better to keep structure or use newName as sheet name too. Let's use newName for filename, maybe original for sheet name or user preference. Standard is keeping it simple.
-          // Applying newName to sheet name as well for consistency
-          // Note: Sheet names have char limits and restrictions, but we assume user input is valid for now.
+          XLSX.utils.book_append_sheet(newWb, ws, s.originalName);
 
-          const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+          const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
           const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
           const url = URL.createObjectURL(blob);
           setResult({ url, name: `${s.newName}.xlsx` });
@@ -1300,7 +1298,7 @@ const ExcelConverter = () => {
             const newWb = XLSX.utils.book_new();
             const ws = wb.Sheets[s.originalName];
             XLSX.utils.book_append_sheet(newWb, ws, s.originalName);
-            const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+            const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
             zip.file(`${s.newName}.xlsx`, xlsxBuffer);
           }
 
@@ -1314,7 +1312,7 @@ const ExcelConverter = () => {
 
         for (const f of mergeFiles) {
           const data = await f.arrayBuffer();
-          const sourceWb = XLSX.read(data);
+          const sourceWb = XLSX.read(data, { cellStyles: true });
 
           sourceWb.SheetNames.forEach(sheetName => {
             let targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
