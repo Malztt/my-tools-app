@@ -1274,31 +1274,47 @@ const ExcelConverter = () => {
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".xlsx" });
       } else if (mode === 'split_sheets') {
-        // Filter selected sheets
         const selectedSheets = sheets.filter(s => s.selected);
         if (selectedSheets.length === 0) throw new Error("Please select at least one sheet");
 
-        if (selectedSheets.length === 1) {
-          // Single sheet -> Download .xlsx directly
-          const s = selectedSheets[0];
-          const newWb = XLSX.utils.book_new();
-          const ws = wb.Sheets[s.originalName];
-          XLSX.utils.book_append_sheet(newWb, ws, s.originalName);
+        // Helper to process a single sheet split (Clone & Delete)
+        const processSingleSplit = async (targetSheetName, newName) => {
+          // Always re-read the original buffer to get a pristine full copy
+          const fileData = await file.arrayBuffer();
+          const wbCopy = XLSX.read(fileData, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
 
-          const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+          // Remove all other sheets
+          wbCopy.SheetNames = wbCopy.SheetNames.filter(n => {
+            if (n !== targetSheetName) {
+              delete wbCopy.Sheets[n];
+              return false;
+            }
+            return true;
+          });
+
+          // Rename the remaining sheet if needed
+          if (targetSheetName !== newName) {
+            const ws = wbCopy.Sheets[targetSheetName];
+            wbCopy.Sheets[newName] = ws;
+            delete wbCopy.Sheets[targetSheetName];
+            wbCopy.SheetNames = [newName];
+          }
+
+          return XLSX.write(wbCopy, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        };
+
+        if (selectedSheets.length === 1) {
+          const s = selectedSheets[0];
+          const xlsxBuffer = await processSingleSplit(s.originalName, s.newName);
           const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
           const url = URL.createObjectURL(blob);
           setResult({ url, name: `${s.newName}.xlsx` });
         } else {
-          // Multiple sheets -> ZIP
           const JSZip = (await import('jszip')).default;
           const zip = new JSZip();
 
           for (const s of selectedSheets) {
-            const newWb = XLSX.utils.book_new();
-            const ws = wb.Sheets[s.originalName];
-            XLSX.utils.book_append_sheet(newWb, ws, s.originalName);
-            const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+            const xlsxBuffer = await processSingleSplit(s.originalName, s.newName);
             zip.file(`${s.newName}.xlsx`, xlsxBuffer);
           }
 
