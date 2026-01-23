@@ -1256,117 +1256,148 @@ const ExcelConverter = () => {
     setStatusMsg('กำลังประมวลผล...');
 
     try {
-      const XLSX = (await import('xlsx-js-style')).default;
+      const ExcelJS = (await import('exceljs')).default;
+      const JSZip = (await import('jszip')).default;
 
       if (mode === 'xls_to_csv') {
+        const workbook = new ExcelJS.Workbook();
         const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { cellStyles: true });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const csv = XLSX.utils.sheet_to_csv(worksheet);
+        await workbook.xlsx.load(arrayBuffer);
 
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const worksheet = workbook.worksheets[0];
+        const csvBuffer = await workbook.csv.writeBuffer();
+
+        const blob = new Blob([csvBuffer], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".csv" });
+
       } else if (mode === 'csv_to_xls') {
-        const text = await file.text();
-        const wb = XLSX.read(text, { type: 'string', raw: true });
-        const xlsxBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        const workbook = new ExcelJS.Workbook();
+        const buffer = await file.arrayBuffer();
+        await workbook.csv.load(buffer);
+
+        const xlsxBuffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".xlsx" });
+
       } else if (mode === 'split_sheets') {
         const selectedSheets = sheets.filter(s => s.selected);
         if (selectedSheets.length === 0) throw new Error("Please select at least one sheet");
 
-        // Helper to process a single sheet split (Clone & Delete)
         const processSingleSplit = async (targetSheetName, newName) => {
-          // Always re-read the original buffer to get a pristine full copy
-          const fileData = await file.arrayBuffer();
-          const wbCopy = XLSX.read(fileData, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
+          const workbook = new ExcelJS.Workbook();
+          const arrayBuffer = await file.arrayBuffer();
+          await workbook.xlsx.load(arrayBuffer);
 
-          // Remove all other sheets
-          wbCopy.SheetNames = wbCopy.SheetNames.filter(n => {
-            if (n !== targetSheetName) {
-              delete wbCopy.Sheets[n];
-              return false;
-            }
-            return true;
+          const sheetsToRemove = workbook.worksheets.filter(ws => ws.name !== targetSheetName);
+          sheetsToRemove.forEach(ws => {
+            workbook.removeWorksheet(ws.id);
           });
 
-          // Rename the remaining sheet if needed
-          if (targetSheetName !== newName) {
-            const ws = wbCopy.Sheets[targetSheetName];
-            wbCopy.Sheets[newName] = ws;
-            delete wbCopy.Sheets[targetSheetName];
-            wbCopy.SheetNames = [newName];
+          const remainingSheet = workbook.getWorksheet(targetSheetName);
+          if (remainingSheet && targetSheetName !== newName) {
+            remainingSheet.name = newName;
           }
 
-          return XLSX.write(wbCopy, { bookType: 'xlsx', type: 'array', cellStyles: true });
+          return await workbook.xlsx.writeBuffer();
         };
 
         if (selectedSheets.length === 1) {
           const s = selectedSheets[0];
-          const xlsxBuffer = await processSingleSplit(s.originalName, s.newName);
-          const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const buffer = await processSingleSplit(s.originalName, s.newName);
+          const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
           const url = URL.createObjectURL(blob);
           setResult({ url, name: `${s.newName}.xlsx` });
         } else {
-          const JSZip = (await import('jszip')).default;
           const zip = new JSZip();
-
           for (const s of selectedSheets) {
-            const xlsxBuffer = await processSingleSplit(s.originalName, s.newName);
-            zip.file(`${s.newName}.xlsx`, xlsxBuffer);
+            const buffer = await processSingleSplit(s.originalName, s.newName);
+            zip.file(`${s.newName}.xlsx`, buffer);
           }
-
           const content = await zip.generateAsync({ type: "blob" });
           const url = URL.createObjectURL(content);
           setResult({ url, name: "split_sheets.zip" });
         }
-      } else if (mode === 'merge_files') {
-        // Master Append Strategy
-        const masterFile = mergeFiles[0];
-        const masterData = await masterFile.arrayBuffer();
-        const masterWb = XLSX.read(masterData, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
-        const sheetNamesSet = new Set(masterWb.SheetNames);
 
-        // Process remaining files
+      } else if (mode === 'merge_files') {
+        const masterFile = mergeFiles[0];
+        const masterWorkbook = new ExcelJS.Workbook();
+        await masterWorkbook.xlsx.load(await masterFile.arrayBuffer());
+
+        const existingNames = new Set(masterWorkbook.worksheets.map(ws => ws.name));
+
         for (let i = 1; i < mergeFiles.length; i++) {
           const f = mergeFiles[i];
-          const data = await f.arrayBuffer();
-          const sourceWb = XLSX.read(data, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
+          const sourceWorkbook = new ExcelJS.Workbook();
+          await sourceWorkbook.xlsx.load(await f.arrayBuffer());
 
-          sourceWb.SheetNames.forEach(sheetName => {
-            let targetName = sheetName;
-
-            // Conflict Resolution (if name exists in Master)
-            if (sheetNamesSet.has(targetName)) {
-              targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
+          sourceWorkbook.worksheets.forEach(sourceSheet => {
+            let targetName = sourceSheet.name;
+            if (existingNames.has(targetName)) {
+              targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sourceSheet.name}`;
             }
+            targetName = targetName.replace(/[\\/?*[\]:]/g, "").substring(0, 31);
 
-            // Sanitization
-            targetName = targetName.replace(/[\\/?*[\]:]/g, "");
-            if (targetName.length > 28) targetName = targetName.substring(0, 28);
-
-            // Unique check
             let finalName = targetName;
             let counter = 1;
-            while (sheetNamesSet.has(finalName)) {
-              const suffix = `_${counter}`;
-              const maxBaseLen = 31 - suffix.length;
-              finalName = targetName.substring(0, maxBaseLen) + suffix;
+            while (existingNames.has(finalName)) {
+              finalName = targetName.substring(0, 28) + `_${counter}`;
               counter++;
             }
+            existingNames.add(finalName);
 
-            sheetNamesSet.add(finalName);
-            const ws = sourceWb.Sheets[sheetName];
-            XLSX.utils.book_append_sheet(masterWb, ws, finalName);
+            const newSheet = masterWorkbook.addWorksheet(finalName, {
+              properties: sourceSheet.properties,
+              pageSetup: sourceSheet.pageSetup,
+              views: sourceSheet.views,
+              state: sourceSheet.state
+            });
+
+            sourceSheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+              const newRow = newSheet.getRow(rowNumber);
+              newRow.height = row.height;
+              newRow.hidden = row.hidden;
+              newRow.outlineLevel = row.outlineLevel;
+
+              row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                const newCell = newRow.getCell(colNumber);
+                newCell.value = cell.value;
+                newCell.style = cell.style;
+                newCell.numFmt = cell.numFmt;
+
+                const col = newSheet.getColumn(colNumber);
+                const sourceCol = sourceSheet.getColumn(colNumber);
+                if (sourceCol) {
+                  col.width = sourceCol.width;
+                  col.hidden = sourceCol.hidden;
+                  col.outlineLevel = sourceCol.outlineLevel;
+                }
+              });
+              newRow.commit();
+            });
+
+            if (sourceSheet.tables) {
+              Object.values(sourceSheet.tables).forEach(table => {
+                try {
+                  newSheet.addTable(table);
+                } catch (e) { console.warn("Could not copy table", e); }
+              });
+            }
+
+            sourceSheet.getImages().forEach(img => {
+              const media = sourceWorkbook.getImage(img.imageId);
+              const newImgId = masterWorkbook.addImage({
+                buffer: media.buffer,
+                extension: media.extension,
+              });
+              newSheet.addImage(newImgId, img.range);
+            });
           });
         }
 
-        const xlsxBuffer = XLSX.write(masterWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
-        const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const buffer = await masterWorkbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: "merged_workbook.xlsx" });
       }
