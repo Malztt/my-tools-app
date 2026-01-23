@@ -204,7 +204,21 @@ const ImageCompressor = () => {
                 <img src={originalImage} alt="Original" className="w-full h-48 object-cover rounded-lg border" />
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-green-600">บีบอัดแล้ว ({formatSize(fileInfo.compressedSize)}) <span className="ml-2 text-xs bg-green-100 px-2 py-0.5 rounded-full">-{Math.round(((fileInfo.originalSize - fileInfo.compressedSize) / fileInfo.originalSize) * 100)}%</span></p>
+                {(() => {
+                  const isSmaller = fileInfo.compressedSize < fileInfo.originalSize;
+                  const diffPercent = Math.abs(Math.round(((fileInfo.originalSize - fileInfo.compressedSize) / fileInfo.originalSize) * 100));
+                  return (
+                    <>
+                      <p className={`text-sm font-medium ${isSmaller ? 'text-green-600' : 'text-red-600'}`}>
+                        บีบอัดแล้ว ({formatSize(fileInfo.compressedSize)})
+                        <span className={`ml-2 text-xs ${isSmaller ? 'bg-green-100' : 'bg-red-100'} px-2 py-0.5 rounded-full`}>
+                          {isSmaller ? '-' : '+'}{diffPercent}%
+                        </span>
+                      </p>
+                      {!isSmaller && <p className="text-xs text-red-500">ไฟล์ใหญ่ขึ้น! ต้นฉบับอาจถูกบีบอัดมาดีแล้ว</p>}
+                    </>
+                  );
+                })()}
                 <img src={compressedImage} alt="Compressed" className="w-full h-48 object-cover rounded-lg border" />
               </div>
             </div>
@@ -232,12 +246,25 @@ const PdfOptimizer = () => {
   const [progress, setProgress] = useState(0);
   const [qualityLevel, setQualityLevel] = useState(70); // 10-100
 
-  const handleFileChange = (e) => {
+  const [numPages, setNumPages] = useState(0);
+
+  const handleFileChange = async (e) => {
     if (e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
       setProcessedPdf(null);
       setStatusMsg('');
       setProgress(0);
+
+      // Get page count for estimation
+      try {
+        const arrayBuffer = await selectedFile.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+        setNumPages(pdf.numPages);
+      } catch (err) {
+        console.error("Error reading PDF metadata:", err);
+        setNumPages(0);
+      }
     }
   };
 
@@ -268,12 +295,16 @@ const PdfOptimizer = () => {
 
         const page = await pdf.getPage(i);
 
+
         // Determine scale and quality based on slider (10-100)
-        // Scale: 0.5 (at 0) to 2.0 (at 100)
-        // Quality: 0.1 to 1.0
+        // Tune formula to favor size reduction
         const qualityVal = qualityLevel / 100;
-        const scale = 0.5 + (1.5 * qualityVal);
-        const quality = Math.max(0.1, qualityVal);
+
+        // Scale: 0.5 to 1.5 (Reduced from 2.0 max)
+        const scale = 0.5 + (1.0 * (qualityLevel / 100));
+
+        // JPEG Quality: 0.2 to 0.8 (Capped at 0.8 to ensure compression)
+        const quality = 0.2 + (0.6 * qualityVal);
 
         const viewport = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
@@ -335,7 +366,7 @@ const PdfOptimizer = () => {
               <div className="bg-red-100 p-3 rounded-lg text-red-600"><FileType size={24} /></div>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-gray-900 truncate">{file.name}</p>
-                <p className="text-sm text-gray-500">{formatSize(file.size)}</p>
+                <p className="text-sm text-gray-500">{formatSize(file.size)} • {numPages} หน้า</p>
               </div>
               <button onClick={() => setFile(null)} className="text-gray-400 hover:text-red-500"><X size={20} /></button>
             </div>
@@ -350,7 +381,9 @@ const PdfOptimizer = () => {
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
                   <div className="flex justify-between items-center">
                     <label className="text-sm font-medium text-gray-700">ระดับคุณภาพ: {qualityLevel}%</label>
-                    <span className="text-xs text-gray-500">{qualityLevel < 40 ? 'ขนาดเล็ก' : qualityLevel > 80 ? 'คุณภาพสูง' : 'สมดุล'}</span>
+                    <span className="text-xs text-gray-500">
+                      ประมาณ: ~{formatSize(numPages * 150000 * (qualityLevel / 100))}
+                    </span>
                   </div>
                   <input
                     type="range"
