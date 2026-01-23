@@ -1323,31 +1323,35 @@ const ExcelConverter = () => {
           setResult({ url, name: "split_sheets.zip" });
         }
       } else if (mode === 'merge_files') {
-        const newWb = XLSX.utils.book_new();
-        const sheetNamesSet = new Set();
+        // Master Append Strategy
+        const masterFile = mergeFiles[0];
+        const masterData = await masterFile.arrayBuffer();
+        const masterWb = XLSX.read(masterData, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
+        const sheetNamesSet = new Set(masterWb.SheetNames);
 
-        for (const f of mergeFiles) {
+        // Process remaining files
+        for (let i = 1; i < mergeFiles.length; i++) {
+          const f = mergeFiles[i];
           const data = await f.arrayBuffer();
-          const sourceWb = XLSX.read(data, { cellStyles: true });
+          const sourceWb = XLSX.read(data, { cellStyles: true, cellFormula: true, cellDates: true, cellNF: true, sheetStubs: true });
 
           sourceWb.SheetNames.forEach(sheetName => {
-            let targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
+            let targetName = sheetName;
 
-            // 1. Remove invalid characters: \ / ? * [ ] :
-            targetName = targetName.replace(/[\\/?*[\]:]/g, "");
-
-            // 2. Truncate to safe length (31 chars max for Excel)
-            // We leave room for suffixes (e.g. _12) so maybe cap base at 25-28
-            if (targetName.length > 28) {
-              targetName = targetName.substring(0, 28);
+            // Conflict Resolution (if name exists in Master)
+            if (sheetNamesSet.has(targetName)) {
+              targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
             }
 
-            // 3. Handle duplicates
+            // Sanitization
+            targetName = targetName.replace(/[\\/?*[\]:]/g, "");
+            if (targetName.length > 28) targetName = targetName.substring(0, 28);
+
+            // Unique check
             let finalName = targetName;
             let counter = 1;
             while (sheetNamesSet.has(finalName)) {
               const suffix = `_${counter}`;
-              // Ensure we don't exceed 31 chars with suffix
               const maxBaseLen = 31 - suffix.length;
               finalName = targetName.substring(0, maxBaseLen) + suffix;
               counter++;
@@ -1355,11 +1359,11 @@ const ExcelConverter = () => {
 
             sheetNamesSet.add(finalName);
             const ws = sourceWb.Sheets[sheetName];
-            XLSX.utils.book_append_sheet(newWb, ws, finalName);
+            XLSX.utils.book_append_sheet(masterWb, ws, finalName);
           });
         }
 
-        const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+        const xlsxBuffer = XLSX.write(masterWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
         const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: "merged_workbook.xlsx" });
