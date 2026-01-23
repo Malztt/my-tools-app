@@ -230,7 +230,7 @@ const PdfOptimizer = () => {
   const [processedPdf, setProcessedPdf] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [progress, setProgress] = useState(0);
-  const [compressionLevel, setCompressionLevel] = useState('medium'); // low, medium, high
+  const [qualityLevel, setQualityLevel] = useState(70); // 10-100
 
   const handleFileChange = (e) => {
     if (e.target.files[0]) {
@@ -268,17 +268,12 @@ const PdfOptimizer = () => {
 
         const page = await pdf.getPage(i);
 
-        // Determine scale and quality based on compression level
-        let scale = 1.0;
-        let quality = 0.7;
-
-        if (compressionLevel === 'low') {
-          scale = 1.5;
-          quality = 0.8;
-        } else if (compressionLevel === 'high') {
-          scale = 0.75;
-          quality = 0.5;
-        }
+        // Determine scale and quality based on slider (10-100)
+        // Scale: 0.5 (at 0) to 2.0 (at 100)
+        // Quality: 0.1 to 1.0
+        const qualityVal = qualityLevel / 100;
+        const scale = 0.5 + (1.5 * qualityVal);
+        const quality = Math.max(0.1, qualityVal);
 
         const viewport = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
@@ -353,17 +348,22 @@ const PdfOptimizer = () => {
                 <p className="text-xs text-gray-400 text-center">เมื่อบีบอัดแล้วข้อความจะไม่สามารถค้นหาได้</p>
 
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                  <p className="text-sm font-medium text-gray-700">ระดับการบีบอัด (คุณภาพ vs ขนาด)</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button onClick={() => setCompressionLevel('low')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'low' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                      ต่ำ (ชัด)
-                    </button>
-                    <button onClick={() => setCompressionLevel('medium')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'medium' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                      กลาง (สมดุล)
-                    </button>
-                    <button onClick={() => setCompressionLevel('high')} className={`text-sm py-2 rounded-lg border transition-all ${compressionLevel === 'high' ? 'bg-indigo-100 border-indigo-500 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                      สูง (เล็กสุด)
-                    </button>
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium text-gray-700">ระดับคุณภาพ: {qualityLevel}%</label>
+                    <span className="text-xs text-gray-500">{qualityLevel < 40 ? 'ขนาดเล็ก' : qualityLevel > 80 ? 'คุณภาพสูง' : 'สมดุล'}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={qualityLevel}
+                    onChange={(e) => setQualityLevel(Number(e.target.value))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-600"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>เล็ก (10%)</span>
+                    <span>ชัดมาก (100%)</span>
                   </div>
                 </div>
               </div>
@@ -414,7 +414,7 @@ const QRCodeGenerator = () => {
   // Color Options
   const [bgColor, setBgColor] = useState('#ffffff');
   const [fgType, setFgType] = useState('single'); // single, gradient
-  const [fgColor, setFgColor] = useState('#000000');
+  const [fgColor, setFgColor] = useState('#111d47');
   const [gradientColor1, setGradientColor1] = useState('#000000');
   const [gradientColor2, setGradientColor2] = useState('#0000ff');
   const [gradientType, setGradientType] = useState('linear');
@@ -639,8 +639,23 @@ const QRCodeGenerator = () => {
               {/* Tab 3: Logo */}
               {activeTab === 'logo' && (
                 <div className="space-y-6 animate-fade-in">
+                  <div className="space-y-4">
+                    <label className="text-sm font-medium text-gray-700 block">เลือกโลโก้มาตรฐาน</label>
+                    <div className="flex gap-3">
+                      {['/default-logo-1.png', '/default-logo-2.png'].map((l, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setLogo(l)}
+                          className="w-16 h-16 border border-gray-200 rounded-lg p-2 hover:border-indigo-500 hover:bg-indigo-50 transition-all bg-white"
+                        >
+                          <img src={l} className="w-full h-full object-contain" alt="Default Logo" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">อัปโหลดโลโก้</label>
+                    <label className="text-sm font-medium text-gray-700">หรือ อัปโหลดโลโก้</label>
                     <div className="relative overflow-hidden bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl w-full p-6 text-center hover:bg-gray-100 transition-all cursor-pointer">
                       <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
                       <div className="flex flex-col items-center justify-center gap-2">
