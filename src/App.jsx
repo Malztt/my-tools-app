@@ -1219,13 +1219,15 @@ const ExcelConverter = () => {
 
       if (mode === 'split_sheets') {
         try {
-          const XLSX = (await import('xlsx-js-style')).default;
-          const data = await f.arrayBuffer();
-          const workbook = XLSX.read(data, { cellStyles: true });
-          setWb(workbook);
-          setSheets(workbook.SheetNames.map(name => ({
-            originalName: name,
-            newName: name,
+          // Switch to ExcelJS for reading sheet names too
+          const ExcelJS = (await import('exceljs')).default;
+          // Note: ExcelJS buffer load is async
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(await f.arrayBuffer());
+
+          setSheets(workbook.worksheets.map(ws => ({
+            originalName: ws.name,
+            newName: ws.name,
             selected: true
           })));
         } catch (err) {
