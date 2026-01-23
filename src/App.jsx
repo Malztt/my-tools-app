@@ -1190,30 +1190,74 @@ const PdfConverter = () => {
 
 // 8. Excel Converter (XLS <-> CSV)
 const ExcelConverter = () => {
-  const [mode, setMode] = useState('xls_to_csv'); // xls_to_csv, csv_to_xls
+  const [mode, setMode] = useState('xls_to_csv'); // xls_to_csv, csv_to_xls, split_sheets, merge_files
   const [file, setFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [result, setResult] = useState(null);
 
-  const handleFileChange = (e) => {
+  // Split/Merge States
+  const [sheets, setSheets] = useState([]); // { originalName, newName, selected }
+  const [mergeFiles, setMergeFiles] = useState([]);
+  const [wb, setWb] = useState(null); // Valid workbook for split mode
+
+  const handleFileChange = async (e) => {
+    if (mode === 'merge_files') {
+      if (e.target.files && e.target.files.length > 0) {
+        setMergeFiles(Array.from(e.target.files));
+        setResult(null);
+        setStatusMsg('');
+      }
+      return;
+    }
+
     if (e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const f = e.target.files[0];
+      setFile(f);
       setResult(null);
       setStatusMsg('');
+
+      if (mode === 'split_sheets') {
+        try {
+          const XLSX = await import('xlsx');
+          const data = await f.arrayBuffer();
+          const workbook = XLSX.read(data);
+          setWb(workbook);
+          setSheets(workbook.SheetNames.map(name => ({
+            originalName: name,
+            newName: name,
+            selected: true
+          })));
+        } catch (err) {
+          console.error(err);
+          setStatusMsg('Error reading Excel file');
+        }
+      }
     }
   };
 
+  const toggleSheetSelection = (index) => {
+    const newSheets = [...sheets];
+    newSheets[index].selected = !newSheets[index].selected;
+    setSheets(newSheets);
+  };
+
+  const updateSheetName = (index, name) => {
+    const newSheets = [...sheets];
+    newSheets[index].newName = name;
+    setSheets(newSheets);
+  };
+
   const processFile = async () => {
-    if (!file) return;
+    if ((mode !== 'merge_files' && !file) || (mode === 'merge_files' && mergeFiles.length === 0)) return;
     setIsProcessing(true);
     setStatusMsg('กำลังประมวลผล...');
 
     try {
       const XLSX = await import('xlsx');
-      const arrayBuffer = await file.arrayBuffer();
 
       if (mode === 'xls_to_csv') {
+        const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer);
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
@@ -1222,23 +1266,80 @@ const ExcelConverter = () => {
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".csv" });
-      } else {
-        // CSV to XLS
-        // Need to read as string for CSV
+      } else if (mode === 'csv_to_xls') {
         const text = await file.text();
-        const workbook = XLSX.utils.book_new();
-        const worksheet = XLSX.utils.aoa_to_sheet(
-          text.split('\n').map(row => row.split(',')) // Simple CSV parser, might need more robust one for complex CSVs but XLSX.read usually handles it better if we pass type: string
-        );
-        // Better approach for CSV to Sheet using XLSX read
         const wb = XLSX.read(text, { type: 'string', raw: true });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-
         const xlsxBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
         setResult({ url, name: file.name.replace(/\.[^/.]+$/, "") + ".xlsx" });
+      } else if (mode === 'split_sheets') {
+        // Filter selected sheets
+        const selectedSheets = sheets.filter(s => s.selected);
+        if (selectedSheets.length === 0) throw new Error("Please select at least one sheet");
+
+        if (selectedSheets.length === 1) {
+          // Single sheet -> Download .xlsx directly
+          const s = selectedSheets[0];
+          const newWb = XLSX.utils.book_new();
+          const ws = wb.Sheets[s.originalName];
+          XLSX.utils.book_append_sheet(newWb, ws, s.originalName); // Keep original sheet name inside potentially? Or newName? Usually better to keep structure or use newName as sheet name too. Let's use newName for filename, maybe original for sheet name or user preference. Standard is keeping it simple.
+          // Applying newName to sheet name as well for consistency
+          // Note: Sheet names have char limits and restrictions, but we assume user input is valid for now.
+
+          const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+          const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const url = URL.createObjectURL(blob);
+          setResult({ url, name: `${s.newName}.xlsx` });
+        } else {
+          // Multiple sheets -> ZIP
+          const JSZip = (await import('jszip')).default;
+          const zip = new JSZip();
+
+          for (const s of selectedSheets) {
+            const newWb = XLSX.utils.book_new();
+            const ws = wb.Sheets[s.originalName];
+            XLSX.utils.book_append_sheet(newWb, ws, s.originalName);
+            const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+            zip.file(`${s.newName}.xlsx`, xlsxBuffer);
+          }
+
+          const content = await zip.generateAsync({ type: "blob" });
+          const url = URL.createObjectURL(content);
+          setResult({ url, name: "split_sheets.zip" });
+        }
+      } else if (mode === 'merge_files') {
+        const newWb = XLSX.utils.book_new();
+        const sheetNamesSet = new Set();
+
+        for (const f of mergeFiles) {
+          const data = await f.arrayBuffer();
+          const sourceWb = XLSX.read(data);
+
+          sourceWb.SheetNames.forEach(sheetName => {
+            let targetName = sheetName;
+            // Handle duplicate sheet names
+            if (sheetNamesSet.has(targetName)) {
+              targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
+              // If still duplicate, append counter (simple safety)
+              let counter = 1;
+              while (sheetNamesSet.has(targetName)) {
+                targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}_${counter}`;
+                counter++;
+              }
+            }
+            sheetNamesSet.add(targetName);
+            const ws = sourceWb.Sheets[sheetName];
+            XLSX.utils.book_append_sheet(newWb, ws, targetName);
+          });
+        }
+
+        const xlsxBuffer = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        setResult({ url, name: "merged_workbook.xlsx" });
       }
+
       setStatusMsg('เสร็จสิ้น!');
     } catch (err) {
       console.error(err);
