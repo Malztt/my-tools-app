@@ -1352,49 +1352,103 @@ const ExcelConverter = () => {
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">แปลงไฟล์ Excel / CSV</h2>
-      </div>
-
-      <div className="flex justify-center gap-4 mb-6">
-        <button onClick={() => { setMode('xls_to_csv'); setFile(null); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'xls_to_csv' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>Excel เป็น CSV</button>
-        <button onClick={() => { setMode('csv_to_xls'); setFile(null); setResult(null); }} className={`px-4 py-2 rounded-lg font-medium transition-all ${mode === 'csv_to_xls' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>CSV เป็น Excel</button>
+        <h2 className="text-2xl font-bold text-gray-800">เครื่องมือ Excel</h2>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div className="space-y-6">
-          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
-            <input
-              type="file"
-              accept={mode === 'xls_to_csv' ? ".xlsx, .xls" : ".csv"}
-              onChange={handleFileChange}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            />
-            <div className="bg-green-100 text-green-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center">
-              <FileSpreadsheet size={32} />
-            </div>
-            <p className="font-medium text-gray-700">
-              {file ? file.name : (mode === 'xls_to_csv' ? "อัปโหลดไฟล์ Excel" : "อัปโหลดไฟล์ CSV")}
-            </p>
-          </div>
-
-          <button
-            onClick={processFile}
-            disabled={isProcessing || !file}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>เริ่มแปลงไฟล์</span></>}
-          </button>
-          {statusMsg && <p className="text-center text-sm text-gray-500">{statusMsg}</p>}
-
-          {result && (
-            <div className="space-y-4 animate-fade-in">
-              <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
-                <Check size={20} /> <span>เรียบร้อย!</span>
-              </div>
-              <a href={result.url} download={result.name} className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลดไฟล์ใหม่</a>
-            </div>
-          )}
+        <div className="bg-gray-100 p-1 rounded-xl flex mb-6 overflow-x-auto">
+          <button onClick={() => { setMode('xls_to_csv'); setFile(null); setResult(null); }} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${mode === 'xls_to_csv' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Excel → CSV</button>
+          <button onClick={() => { setMode('csv_to_xls'); setFile(null); setResult(null); }} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${mode === 'csv_to_xls' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>CSV → Excel</button>
+          <button onClick={() => { setMode('split_sheets'); setFile(null); setResult(null); }} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${mode === 'split_sheets' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>แยก Sheet</button>
+          <button onClick={() => { setMode('merge_files'); setMergeFiles([]); setResult(null); }} className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${mode === 'merge_files' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>รวมไฟล์</button>
         </div>
+
+        {mode === 'merge_files' ? (
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group mb-4">
+            <input type="file" accept=".xlsx,.xls" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-12 h-12 mx-auto mb-3 group-hover:scale-110 transition-transform flex items-center justify-center"><Upload size={24} /></div>
+            <p className="font-medium text-gray-700">เลือกไฟล์ Excel หลายไฟล์</p>
+            {mergeFiles.length > 0 && <div className="mt-2"><span className="text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full">เลือกแล้ว {mergeFiles.length} ไฟล์</span></div>}
+          </div>
+        ) : !file ? (
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group mb-4">
+            <input type="file" accept={mode === 'csv_to_xls' ? ".csv" : ".xlsx,.xls"} onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-12 h-12 mx-auto mb-3 group-hover:scale-110 transition-transform flex items-center justify-center"><FileSpreadsheet size={32} /></div>
+            <p className="font-medium text-gray-700">อัปโหลดไฟล์ {mode === 'csv_to_xls' ? 'CSV' : 'Excel'}</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200 mb-4">
+            <div className="bg-green-100 p-3 rounded-lg text-green-600"><FileSpreadsheet size={24} /></div>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-gray-900 truncate">{file.name}</p>
+              <p className="text-sm text-gray-500">{formatSize(file.size)}</p>
+            </div>
+            <button onClick={() => setFile(null)} className="text-gray-400 hover:text-red-500"><X size={20} /></button>
+          </div>
+        )}
+
+        {/* Split Sheets UI */}
+        {mode === 'split_sheets' && sheets.length > 0 && (
+          <div className="space-y-3 mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-gray-700">เลือก Sheet ที่ต้องการแยก</span>
+              <div className="flex gap-2">
+                <button onClick={() => setSheets(sheets.map(s => ({ ...s, selected: true })))} className="text-xs text-indigo-600 hover:underline">เลือกทั้งหมด</button>
+                <button onClick={() => setSheets(sheets.map(s => ({ ...s, selected: false })))} className="text-xs text-gray-500 hover:underline">ไม่เลือก</button>
+              </div>
+            </div>
+            <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2 border rounded-xl p-2 bg-gray-50">
+              {sheets.map((sheet, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={sheet.selected}
+                    onChange={() => toggleSheetSelection(idx)}
+                    className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-xs text-gray-400">ชื่อ Sheet เดิม: <span className="font-medium text-gray-600">{sheet.originalName}</span></span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">ชื่อไฟล์ใหม่:</span>
+                      <input
+                        type="text"
+                        value={sheet.newName}
+                        onChange={(e) => updateSheetName(idx, e.target.value)}
+                        className="flex-1 text-sm border-b border-gray-300 focus:border-indigo-500 outline-none bg-transparent py-0.5 text-gray-800 placeholder-gray-300"
+                        placeholder="ตั้งชื่อไฟล์..."
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="text-xs text-gray-400">.xlsx</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={processFile}
+          disabled={isProcessing || (mode !== 'merge_files' && !file) || (mode === 'merge_files' && mergeFiles.length === 0)}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isProcessing ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Zap size={20} /><span>เริ่มประมวลผล</span></>}
+        </button>
+
+        {statusMsg && <p className="text-center text-sm text-gray-500 mt-4 animate-pulse">{statusMsg}</p>}
+
+        {result && (
+          <div className="mt-6 p-4 bg-green-50 border border-green-100 rounded-xl flex items-center justify-between animate-fade-in shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-green-700">
+              <Check size={20} /> <span>เสร็จเรียบร้อย!</span>
+            </div>
+            <a href={result.url} download={result.name} className="bg-gray-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-800 transition-all flex items-center gap-2 shadow-md">
+              <Download size={16} /> ดาวน์โหลดผลลัพธ์
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
