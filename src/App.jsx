@@ -1317,20 +1317,31 @@ const ExcelConverter = () => {
           const sourceWb = XLSX.read(data);
 
           sourceWb.SheetNames.forEach(sheetName => {
-            let targetName = sheetName;
-            // Handle duplicate sheet names
-            if (sheetNamesSet.has(targetName)) {
-              targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
-              // If still duplicate, append counter (simple safety)
-              let counter = 1;
-              while (sheetNamesSet.has(targetName)) {
-                targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}_${counter}`;
-                counter++;
-              }
+            let targetName = `${f.name.replace(/\.[^/.]+$/, "")}_${sheetName}`;
+
+            // 1. Remove invalid characters: \ / ? * [ ] :
+            targetName = targetName.replace(/[\\/?*[\]:]/g, "");
+
+            // 2. Truncate to safe length (31 chars max for Excel)
+            // We leave room for suffixes (e.g. _12) so maybe cap base at 25-28
+            if (targetName.length > 28) {
+              targetName = targetName.substring(0, 28);
             }
-            sheetNamesSet.add(targetName);
+
+            // 3. Handle duplicates
+            let finalName = targetName;
+            let counter = 1;
+            while (sheetNamesSet.has(finalName)) {
+              const suffix = `_${counter}`;
+              // Ensure we don't exceed 31 chars with suffix
+              const maxBaseLen = 31 - suffix.length;
+              finalName = targetName.substring(0, maxBaseLen) + suffix;
+              counter++;
+            }
+
+            sheetNamesSet.add(finalName);
             const ws = sourceWb.Sheets[sheetName];
-            XLSX.utils.book_append_sheet(newWb, ws, targetName);
+            XLSX.utils.book_append_sheet(newWb, ws, finalName);
           });
         }
 
