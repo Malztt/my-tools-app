@@ -1953,6 +1953,7 @@ const PdfWatermark = () => {
   const [statusMsg, setStatusMsg] = useState('');
   
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [previewPage, setPreviewPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pdfAspectRatio, setPdfAspectRatio] = useState(1 / 1.414);
@@ -2052,10 +2053,37 @@ const PdfWatermark = () => {
       } catch (err) {
         console.error("Failed to parse PDF dimensions", err);
       }
-      
-      setPreviewUrl(URL.createObjectURL(selectedFile));
     }
   };
+
+  useEffect(() => {
+    const loadSinglePage = async () => {
+      if (!file) return;
+      setIsPreviewLoading(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfDoc = await PDFDocument.load(arrayBuffer);
+        const pageCount = pdfDoc.getPageCount();
+        const targetIndex = previewPage - 1;
+        
+        for (let i = pageCount - 1; i >= 0; i--) {
+          if (i !== targetIndex) {
+            pdfDoc.removePage(i);
+          }
+        }
+        
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        setPreviewUrl(URL.createObjectURL(blob));
+      } catch (err) {
+        console.error("Single page preview error", err);
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    };
+    
+    loadSinglePage();
+  }, [file, previewPage]);
 
 
 
@@ -2183,13 +2211,14 @@ const PdfWatermark = () => {
             <div className="flex-1 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden flex flex-col h-[500px] lg:h-auto min-h-[400px]">
               <div className="p-3 bg-white border-b border-gray-200 flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-700 flex items-center gap-2"><Eye size={16} className="text-gray-400"/> ภาพตัวอย่าง PDF</span>
+                {isPreviewLoading && <span className="flex items-center gap-2 text-xs text-indigo-600"><span className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></span> กำลังเปลี่ยนหน้า...</span>}
               </div>
               
               {file && (
                 <div className="bg-white px-3 py-2 border-b border-gray-200 flex items-center justify-center gap-4">
                   <button 
                     onClick={() => setPreviewPage(p => Math.max(1, p - 1))}
-                    disabled={previewPage <= 1}
+                    disabled={previewPage <= 1 || isPreviewLoading}
                     className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
                   >
                     ก่อนหน้า
@@ -2197,7 +2226,7 @@ const PdfWatermark = () => {
                   <span className="text-sm font-medium text-gray-700">หน้าที่ {previewPage} / {totalPages}</span>
                   <button 
                     onClick={() => setPreviewPage(p => Math.min(totalPages, p + 1))}
-                    disabled={previewPage >= totalPages}
+                    disabled={previewPage >= totalPages || isPreviewLoading}
                     className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
                   >
                     ถัดไป
