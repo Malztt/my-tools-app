@@ -1953,8 +1953,6 @@ const PdfWatermark = () => {
   const [statusMsg, setStatusMsg] = useState('');
   
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const previewTimer = useRef(null);
   const [previewPage, setPreviewPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pdfAspectRatio, setPdfAspectRatio] = useState(1 / 1.414);
@@ -2012,17 +2010,15 @@ const PdfWatermark = () => {
       
       const lines = text.split('\n');
       const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
-      const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
+      const fontHeight = customFont.heightAtSize(fontSize);
+      const lineHeight = fontHeight * 1.2;
       const textHeight = lineHeight * lines.length;
       
-      const padding = 20;
+      const centerX = width * dragPos.x;
+      const centerY = height * (1 - dragPos.y);
       
-      const maxX = Math.max(0, width - textWidth - (padding * 2));
-      const x = padding + (maxX * dragPos.x);
-      
-      const maxTopY = height - padding - lineHeight;
-      const maxBottomY = padding + textHeight - lineHeight;
-      const y = maxTopY - ((maxTopY - maxBottomY) * dragPos.y);
+      const x = centerX - (textWidth / 2);
+      const y = centerY + (textHeight / 2) - fontHeight;
 
       page.drawText(text, {
         x,
@@ -2036,57 +2032,32 @@ const PdfWatermark = () => {
     }
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
       setResultPdf(null);
       setPreviewUrl(null);
       setPreviewPage(1);
-    }
-  };
 
-  const generatePreview = async () => {
-    if (!file || !text.trim()) return;
-    setIsPreviewLoading(true);
-
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
-      
-      setTotalPages(pdfDoc.getPageCount());
-      if (pdfDoc.getPageCount() > 0) {
-        const { width, height } = pdfDoc.getPages()[0].getSize();
-        setPdfAspectRatio(width / height);
-      }
-
-      const pageCount = pdfDoc.getPageCount();
-      const targetIndex = previewPage - 1;
-      for (let i = pageCount - 1; i >= 0; i--) {
-        if (i !== targetIndex) {
-          pdfDoc.removePage(i);
+      try {
+        const arrayBuffer = await selectedFile.arrayBuffer();
+        const pdfDoc = await PDFDocument.load(arrayBuffer);
+        
+        setTotalPages(pdfDoc.getPageCount());
+        if (pdfDoc.getPageCount() > 0) {
+          const { width, height } = pdfDoc.getPages()[0].getSize();
+          setPdfAspectRatio(width / height);
         }
+      } catch (err) {
+        console.error("Failed to parse PDF dimensions", err);
       }
       
-      await applyWatermarkToPdf(pdfDoc);
-
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-    } catch (error) {
-      console.error("Preview error:", error);
-    } finally {
-      setIsPreviewLoading(false);
+      setPreviewUrl(URL.createObjectURL(selectedFile));
     }
   };
 
-  useEffect(() => {
-    if (previewTimer.current) clearTimeout(previewTimer.current);
-    previewTimer.current = setTimeout(() => {
-      generatePreview();
-    }, 500); // 500ms debounce
-    return () => clearTimeout(previewTimer.current);
-  }, [file, text, fontSize, opacity, dragPos, previewPage]);
+
 
   const processPdf = async () => {
     if (!file) return;
@@ -2257,17 +2228,22 @@ const PdfWatermark = () => {
                       title="PDF Preview" 
                     />
                     
-                    {/* Draggable Target Indicator */}
+                    {/* Draggable HTML Watermark Preview */}
                     <div 
-                      className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white z-10 transition-transform"
+                      className="absolute pointer-events-none whitespace-pre-wrap font-bold text-black z-10"
                       style={{ 
                         left: `${dragPos.x * 100}%`, 
                         top: `${dragPos.y * 100}%`,
                         transform: 'translate(-50%, -50%)',
-                        boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
+                        opacity: opacity,
+                        fontFamily: 'THSarabunPSK, sans-serif',
+                        fontSize: `${fontSize}pt`,
+                        lineHeight: 1.2,
+                        textAlign: 'left',
+                        width: 'max-content'
                       }}
                     >
-                       <Type size={12} />
+                      {text}
                     </div>
                   </div>
                 ) : (
