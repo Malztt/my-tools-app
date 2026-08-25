@@ -2211,6 +2211,7 @@ const PdfWatermark = () => {
                     className="relative bg-white shadow-lg touch-none"
                     style={{ 
                       aspectRatio: pdfAspectRatio, 
+                      height: '100%',
                       maxHeight: '100%', 
                       maxWidth: '100%'
                     }}
