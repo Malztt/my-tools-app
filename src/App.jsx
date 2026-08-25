@@ -1945,16 +1945,131 @@ const PdfWatermark = () => {
   const [fontSize, setFontSize] = useState(24);
   const [opacity, setOpacity] = useState(0.5);
   const [position, setPosition] = useState('bottom-right');
+  const [pageRange, setPageRange] = useState('ทั้งหมด');
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultPdf, setResultPdf] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
+  
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const previewTimer = useRef(null);
+
+  const parsePageRange = (rangeStr, maxPages) => {
+    if (!rangeStr || rangeStr.trim() === 'ทั้งหมด' || rangeStr.trim().toLowerCase() === 'all') {
+      return Array.from({ length: maxPages }, (_, i) => i);
+    }
+    
+    const pages = new Set();
+    const parts = rangeStr.split(',');
+    
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      
+      if (trimmed.includes('-')) {
+        const [start, end] = trimmed.split('-').map(Number);
+        if (!isNaN(start) && !isNaN(end) && start <= end) {
+          for (let i = start; i <= end; i++) {
+            if (i >= 1 && i <= maxPages) pages.add(i - 1);
+          }
+        }
+      } else {
+        const num = Number(trimmed);
+        if (!isNaN(num) && num >= 1 && num <= maxPages) {
+          pages.add(num - 1);
+        }
+      }
+    }
+    return Array.from(pages);
+  };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
       setResultPdf(null);
+      setPreviewUrl(null);
     }
   };
+
+  const generatePreview = async () => {
+    if (!file || !text.trim()) return;
+    setIsPreviewLoading(true);
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      
+      pdfDoc.registerFontkit(fontkit);
+      const fontUrl = '/THSarabunPSK.ttf';
+      const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
+      const customFont = await pdfDoc.embedFont(fontBytes);
+
+      // Remove all pages except the first target page for fast preview
+      const pageCount = pdfDoc.getPageCount();
+      const targetPages = parsePageRange(pageRange, pageCount);
+      const previewPageIndex = targetPages.length > 0 ? targetPages[0] : 0;
+      
+      for (let i = pageCount - 1; i >= 0; i--) {
+        if (i !== previewPageIndex) {
+          pdfDoc.removePage(i);
+        }
+      }
+      
+      const pages = pdfDoc.getPages();
+      if (pages.length > 0) {
+        const page = pages[0];
+        const { width, height } = page.getSize();
+        
+        const lines = text.split('\n');
+        const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
+        const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
+        const textHeight = lineHeight * lines.length;
+        
+        const padding = 20;
+        let x = padding;
+        let y = padding + textHeight - lineHeight;
+
+        if (position === 'top-left') {
+          y = height - padding - lineHeight;
+        } else if (position === 'top-right') {
+          x = width - textWidth - padding;
+          y = height - padding - lineHeight;
+        } else if (position === 'center') {
+          x = (width / 2) - (textWidth / 2);
+          y = (height / 2) + (textHeight / 2) - lineHeight;
+        } else if (position === 'bottom-right') {
+          x = width - textWidth - padding;
+        }
+
+        page.drawText(text, {
+          x,
+          y,
+          size: fontSize,
+          font: customFont,
+          color: rgb(0, 0, 0),
+          opacity: opacity,
+          lineHeight: lineHeight,
+        });
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+    } catch (error) {
+      console.error("Preview error:", error);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      generatePreview();
+    }, 500); // 500ms debounce
+    return () => clearTimeout(previewTimer.current);
+  }, [file, text, fontSize, opacity, position, pageRange]);
 
   const processPdf = async () => {
     if (!file) return;
@@ -1974,25 +2089,29 @@ const PdfWatermark = () => {
 
       setStatusMsg('กำลังใส่ข้อความลงในเอกสาร...');
       const pages = pdfDoc.getPages();
+      const targetPages = parsePageRange(pageRange, pages.length);
       
-      for (const page of pages) {
+      for (const pageIndex of targetPages) {
+        const page = pages[pageIndex];
         const { width, height } = page.getSize();
         
-        const textWidth = customFont.widthOfTextAtSize(text, fontSize);
-        const textHeight = customFont.heightAtSize(fontSize);
+        const lines = text.split('\n');
+        const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
+        const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
+        const textHeight = lineHeight * lines.length;
         
         const padding = 20;
         let x = padding;
-        let y = padding;
+        let y = padding + textHeight - lineHeight;
 
         if (position === 'top-left') {
-          y = height - textHeight - padding;
+          y = height - padding - lineHeight;
         } else if (position === 'top-right') {
           x = width - textWidth - padding;
-          y = height - textHeight - padding;
+          y = height - padding - lineHeight;
         } else if (position === 'center') {
           x = (width / 2) - (textWidth / 2);
-          y = (height / 2) - (textHeight / 2);
+          y = (height / 2) + (textHeight / 2) - lineHeight;
         } else if (position === 'bottom-right') {
           x = width - textWidth - padding;
         }
@@ -2004,6 +2123,7 @@ const PdfWatermark = () => {
           font: customFont,
           color: rgb(0, 0, 0),
           opacity: opacity,
+          lineHeight: lineHeight,
         });
       }
 
@@ -2038,100 +2158,132 @@ const PdfWatermark = () => {
             </label>
           </div>
         ) : (
-          <div className="space-y-6 max-w-2xl mx-auto">
-            <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between border border-gray-100">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <FileType className="text-indigo-600 shrink-0" size={24} />
-                <span className="font-medium truncate">{file.name}</span>
-                <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{formatSize(file.size)}</span>
+          <div className="h-full flex flex-col lg:flex-row gap-6">
+            <div className="flex-1 space-y-6 lg:max-w-md">
+              <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between border border-gray-100">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <FileType className="text-indigo-600 shrink-0" size={24} />
+                  <span className="font-medium truncate">{file.name}</span>
+                  <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{formatSize(file.size)}</span>
+                </div>
+                <button onClick={() => { setFile(null); setResultPdf(null); setPreviewUrl(null); }} className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button>
               </div>
-              <button onClick={() => { setFile(null); setResultPdf(null); }} className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button>
-            </div>
 
-            {!resultPdf ? (
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ</label>
-                  <input
-                    type="text"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                    placeholder="เช่น สำเนาถูกต้อง"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    ขนาดตัวอักษร: {fontSize} pt
-                  </label>
-                  <input
-                    type="range"
-                    min="16"
-                    max="60"
-                    value={fontSize}
-                    onChange={(e) => setFontSize(Number(e.target.value))}
-                    className="w-full accent-indigo-600"
-                  />
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>16</span>
-                    <span>60</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      ความโปร่งแสง: {Math.round(opacity * 100)}%
-                    </label>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="1.0"
-                      step="0.1"
-                      value={opacity}
-                      onChange={(e) => setOpacity(Number(e.target.value))}
-                      className="w-full accent-indigo-600"
-                    />
-                    <div className="flex justify-between text-xs text-gray-500 mt-1">
-                      <span>จาง (10%)</span>
-                      <span>เข้ม (100%)</span>
+              {!resultPdf ? (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ (หลายบรรทัดได้)</label>
+                      <textarea
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
+                        rows="3"
+                        placeholder={"สำเนาถูกต้อง\n1 มกราคม 2567"}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">หน้าที่ต้องการ</label>
+                      <input
+                        type="text"
+                        value={pageRange}
+                        onChange={(e) => setPageRange(e.target.value)}
+                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                        placeholder="เช่น ทั้งหมด, 1, 3, 5-10"
+                      />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ตำแหน่ง</label>
-                    <select
-                      value={position}
-                      onChange={(e) => setPosition(e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                    >
-                      <option value="top-left">มุมซ้ายบน</option>
-                      <option value="top-right">มุมขวาบน</option>
-                      <option value="center">ตรงกลาง</option>
-                      <option value="bottom-left">มุมซ้ายล่าง</option>
-                      <option value="bottom-right">มุมขวาล่าง</option>
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ขนาดตัวอักษร: {fontSize} pt
+                    </label>
+                    <input
+                      type="range"
+                      min="16"
+                      max="60"
+                      value={fontSize}
+                      onChange={(e) => setFontSize(Number(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>16</span>
+                      <span>60</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        ความโปร่งแสง: {Math.round(opacity * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.1"
+                        value={opacity}
+                        onChange={(e) => setOpacity(Number(e.target.value))}
+                        className="w-full accent-indigo-600"
+                      />
+                      <div className="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>จาง (10%)</span>
+                        <span>เข้ม (100%)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ตำแหน่ง</label>
+                      <select
+                        value={position}
+                        onChange={(e) => setPosition(e.target.value)}
+                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                      >
+                        <option value="top-left">มุมซ้ายบน</option>
+                        <option value="top-right">มุมขวาบน</option>
+                        <option value="center">ตรงกลาง</option>
+                        <option value="bottom-left">มุมซ้ายล่าง</option>
+                        <option value="bottom-right">มุมขวาล่าง</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={processPdf}
+                    disabled={isProcessing || !text.trim()}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                  >
+                    {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Type size={20} /><span>ดำเนินการทุกหน้า</span></>}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center justify-between font-bold text-green-700">
+                    <div className="flex items-center gap-2"><Check size={20} /> <span>ประมวลผลเสร็จสิ้น!</span></div>
+                  </div>
+                  <div className="flex flex-col gap-4">
+                      <a href={resultPdf} download={`watermark-${file.name}`} className="block w-full bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-all text-center flex justify-center items-center gap-2"><Download size={18} /> ดาวน์โหลดไฟล์ใหม่</a>
+                      <button onClick={() => { setFile(null); setResultPdf(null); setPreviewUrl(null); }} className="block w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-xl hover:bg-gray-200 transition-all text-center">ทำไฟล์อื่นต่อ</button>
                   </div>
                 </div>
-
-                <button
-                  onClick={processPdf}
-                  disabled={isProcessing || !text.trim()}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Type size={20} /><span>ใส่ข้อความลง PDF</span></>}
-                </button>
+              )}
+            </div>
+            
+            {/* Live Preview Column */}
+            <div className="flex-1 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden flex flex-col h-[500px] lg:h-auto min-h-[400px]">
+              <div className="p-3 bg-white border-b border-gray-200 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700 flex items-center gap-2"><Eye size={16} className="text-gray-400"/> ภาพตัวอย่าง (เฉพาะหน้าแรก)</span>
+                {isPreviewLoading && <span className="flex items-center gap-2 text-xs text-indigo-600"><span className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></span> กำลังอัปเดต...</span>}
               </div>
-            ) : (
-              <div className="space-y-4 animate-fade-in">
-                <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center justify-between font-bold text-green-700">
-                  <div className="flex items-center gap-2"><Check size={20} /> <span>ประมวลผลเสร็จสิ้น!</span></div>
-                </div>
-                <div className="flex gap-4">
-                    <a href={resultPdf} download={`watermark-${file.name}`} className="flex-1 block w-full bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-all text-center flex justify-center items-center gap-2"><Download size={18} /> ดาวน์โหลดไฟล์ใหม่</a>
-                    <button onClick={() => { setFile(null); setResultPdf(null); }} className="flex-1 block w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-xl hover:bg-gray-200 transition-all text-center">ทำไฟล์อื่นต่อ</button>
-                </div>
+              <div className="flex-1 relative bg-gray-50/50">
+                {previewUrl ? (
+                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`} className="w-full h-full border-0" title="PDF Preview" />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                    <span className="animate-pulse">กำลังโหลดตัวอย่าง...</span>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+            
           </div>
         )}
       </div>
