@@ -1944,8 +1944,10 @@ const PdfWatermark = () => {
   const [text, setText] = useState('สำเนาถูกต้อง');
   const [fontSize, setFontSize] = useState(24);
   const [opacity, setOpacity] = useState(0.5);
-  const [position, setPosition] = useState('bottom-right');
-  const [pageRange, setPageRange] = useState('ทั้งหมด');
+  const [dragPos, setDragPos] = useState({ x: 0.5, y: 0.5 });
+  const mapRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultPdf, setResultPdf] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
@@ -1954,33 +1956,81 @@ const PdfWatermark = () => {
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const previewTimer = useRef(null);
 
-  const parsePageRange = (rangeStr, maxPages) => {
-    if (!rangeStr || rangeStr.trim() === 'ทั้งหมด' || rangeStr.trim().toLowerCase() === 'all') {
-      return Array.from({ length: maxPages }, (_, i) => i);
+  const updateDragPos = (e) => {
+    if (!mapRef.current) return;
+    const rect = mapRef.current.getBoundingClientRect();
+    
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    
+    if (e.touches && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
     }
     
-    const pages = new Set();
-    const parts = rangeStr.split(',');
+    let x = (clientX - rect.left) / rect.width;
+    let y = (clientY - rect.top) / rect.height;
     
-    for (const part of parts) {
-      const trimmed = part.trim();
-      if (!trimmed) continue;
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+    setDragPos({ x, y });
+  };
+
+  const handlePointerDown = (e) => {
+    setIsDragging(true);
+    updateDragPos(e);
+    if (e.target && e.target.setPointerCapture && e.pointerId) {
+      try { e.target.setPointerCapture(e.pointerId); } catch(err) {}
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    if (isDragging) updateDragPos(e);
+  };
+
+  const handlePointerUp = (e) => {
+    setIsDragging(false);
+    if (e.target && e.target.releasePointerCapture && e.pointerId) {
+      try { e.target.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
+  };
+
+  const applyWatermarkToPdf = async (pdfDoc) => {
+    pdfDoc.registerFontkit(fontkit);
+    const fontUrl = '/THSarabunPSK.ttf';
+    const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
+    const customFont = await pdfDoc.embedFont(fontBytes);
+
+    const pages = pdfDoc.getPages();
+    if (pages.length === 0) return;
+
+    for (const page of pages) {
+      const { width, height } = page.getSize();
       
-      if (trimmed.includes('-')) {
-        const [start, end] = trimmed.split('-').map(Number);
-        if (!isNaN(start) && !isNaN(end) && start <= end) {
-          for (let i = start; i <= end; i++) {
-            if (i >= 1 && i <= maxPages) pages.add(i - 1);
-          }
-        }
-      } else {
-        const num = Number(trimmed);
-        if (!isNaN(num) && num >= 1 && num <= maxPages) {
-          pages.add(num - 1);
-        }
-      }
+      const lines = text.split('\n');
+      const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
+      const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
+      const textHeight = lineHeight * lines.length;
+      
+      const padding = 20;
+      
+      const maxX = Math.max(0, width - textWidth - (padding * 2));
+      const x = padding + (maxX * dragPos.x);
+      
+      const maxTopY = height - padding - lineHeight;
+      const maxBottomY = padding + textHeight - lineHeight;
+      const y = maxTopY - ((maxTopY - maxBottomY) * dragPos.y);
+
+      page.drawText(text, {
+        x,
+        y,
+        size: fontSize,
+        font: customFont,
+        color: rgb(0, 0, 0),
+        opacity: opacity,
+        lineHeight: lineHeight,
+      });
     }
-    return Array.from(pages);
   };
 
   const handleFileChange = (e) => {
@@ -1999,58 +2049,7 @@ const PdfWatermark = () => {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       
-      pdfDoc.registerFontkit(fontkit);
-      const fontUrl = '/THSarabunPSK.ttf';
-      const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
-      const customFont = await pdfDoc.embedFont(fontBytes);
-
-      // Remove all pages except the first target page for fast preview
-      const pageCount = pdfDoc.getPageCount();
-      const targetPages = parsePageRange(pageRange, pageCount);
-      const previewPageIndex = targetPages.length > 0 ? targetPages[0] : 0;
-      
-      for (let i = pageCount - 1; i >= 0; i--) {
-        if (i !== previewPageIndex) {
-          pdfDoc.removePage(i);
-        }
-      }
-      
-      const pages = pdfDoc.getPages();
-      if (pages.length > 0) {
-        const page = pages[0];
-        const { width, height } = page.getSize();
-        
-        const lines = text.split('\n');
-        const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
-        const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
-        const textHeight = lineHeight * lines.length;
-        
-        const padding = 20;
-        let x = padding;
-        let y = padding + textHeight - lineHeight;
-
-        if (position === 'top-left') {
-          y = height - padding - lineHeight;
-        } else if (position === 'top-right') {
-          x = width - textWidth - padding;
-          y = height - padding - lineHeight;
-        } else if (position === 'center') {
-          x = (width / 2) - (textWidth / 2);
-          y = (height / 2) + (textHeight / 2) - lineHeight;
-        } else if (position === 'bottom-right') {
-          x = width - textWidth - padding;
-        }
-
-        page.drawText(text, {
-          x,
-          y,
-          size: fontSize,
-          font: customFont,
-          color: rgb(0, 0, 0),
-          opacity: opacity,
-          lineHeight: lineHeight,
-        });
-      }
+      await applyWatermarkToPdf(pdfDoc);
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -2069,63 +2068,18 @@ const PdfWatermark = () => {
       generatePreview();
     }, 500); // 500ms debounce
     return () => clearTimeout(previewTimer.current);
-  }, [file, text, fontSize, opacity, position, pageRange]);
+  }, [file, text, fontSize, opacity, dragPos]);
 
   const processPdf = async () => {
     if (!file) return;
     setIsProcessing(true);
-    setStatusMsg('กำลังเตรียมไฟล์...');
+    setStatusMsg('กำลังประมวลผล PDF...');
 
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       
-      pdfDoc.registerFontkit(fontkit);
-
-      setStatusMsg('กำลังโหลดฟอนต์ภาษาไทย...');
-      const fontUrl = '/THSarabunPSK.ttf';
-      const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
-      const customFont = await pdfDoc.embedFont(fontBytes);
-
-      setStatusMsg('กำลังใส่ข้อความลงในเอกสาร...');
-      const pages = pdfDoc.getPages();
-      const targetPages = parsePageRange(pageRange, pages.length);
-      
-      for (const pageIndex of targetPages) {
-        const page = pages[pageIndex];
-        const { width, height } = page.getSize();
-        
-        const lines = text.split('\n');
-        const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
-        const lineHeight = customFont.heightAtSize(fontSize) * 1.2;
-        const textHeight = lineHeight * lines.length;
-        
-        const padding = 20;
-        let x = padding;
-        let y = padding + textHeight - lineHeight;
-
-        if (position === 'top-left') {
-          y = height - padding - lineHeight;
-        } else if (position === 'top-right') {
-          x = width - textWidth - padding;
-          y = height - padding - lineHeight;
-        } else if (position === 'center') {
-          x = (width / 2) - (textWidth / 2);
-          y = (height / 2) + (textHeight / 2) - lineHeight;
-        } else if (position === 'bottom-right') {
-          x = width - textWidth - padding;
-        }
-
-        page.drawText(text, {
-          x,
-          y,
-          size: fontSize,
-          font: customFont,
-          color: rgb(0, 0, 0),
-          opacity: opacity,
-          lineHeight: lineHeight,
-        });
-      }
+      await applyWatermarkToPdf(pdfDoc);
 
       setStatusMsg('กำลังบันทึกไฟล์...');
       const pdfBytes = await pdfDoc.save();
@@ -2171,78 +2125,77 @@ const PdfWatermark = () => {
 
               {!resultPdf ? (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ (หลายบรรทัดได้)</label>
-                      <textarea
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
-                        rows="3"
-                        placeholder={"สำเนาถูกต้อง\n1 มกราคม 2567"}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">หน้าที่ต้องการ</label>
-                      <input
-                        type="text"
-                        value={pageRange}
-                        onChange={(e) => setPageRange(e.target.value)}
-                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                        placeholder="เช่น ทั้งหมด, 1, 3, 5-10"
-                      />
-                    </div>
-                  </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      ขนาดตัวอักษร: {fontSize} pt
-                    </label>
-                    <input
-                      type="range"
-                      min="16"
-                      max="60"
-                      value={fontSize}
-                      onChange={(e) => setFontSize(Number(e.target.value))}
-                      className="w-full accent-indigo-600"
+                    <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ (หลายบรรทัดได้)</label>
+                    <textarea
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
+                      rows="3"
+                      placeholder={"สำเนาถูกต้อง\n1 มกราคม 2567"}
                     />
-                    <div className="flex justify-between text-xs text-gray-500 mt-1">
-                      <span>16</span>
-                      <span>60</span>
-                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        ความโปร่งแสง: {Math.round(opacity * 100)}%
-                      </label>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1.0"
-                        step="0.1"
-                        value={opacity}
-                        onChange={(e) => setOpacity(Number(e.target.value))}
-                        className="w-full accent-indigo-600"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>จาง (10%)</span>
-                        <span>เข้ม (100%)</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ขนาดตัวอักษร: {fontSize} pt
+                        </label>
+                        <input
+                          type="range"
+                          min="16"
+                          max="60"
+                          value={fontSize}
+                          onChange={(e) => setFontSize(Number(e.target.value))}
+                          className="w-full accent-indigo-600"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ความโปร่งแสง: {Math.round(opacity * 100)}%
+                        </label>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.1"
+                          value={opacity}
+                          onChange={(e) => setOpacity(Number(e.target.value))}
+                          className="w-full accent-indigo-600"
+                        />
                       </div>
                     </div>
+                    
+                    {/* Drag Map Area */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">ตำแหน่ง</label>
-                      <select
-                        value={position}
-                        onChange={(e) => setPosition(e.target.value)}
-                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        ตำแหน่ง (ลากวางได้)
+                      </label>
+                      <div className="w-full aspect-[1/1.414] max-h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 relative overflow-hidden mx-auto touch-none select-none"
+                           ref={mapRef}
+                           onPointerDown={handlePointerDown}
+                           onPointerMove={handlePointerMove}
+                           onPointerUp={handlePointerUp}
+                           onPointerCancel={handlePointerUp}
+                           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                       >
-                        <option value="top-left">มุมซ้ายบน</option>
-                        <option value="top-right">มุมขวาบน</option>
-                        <option value="center">ตรงกลาง</option>
-                        <option value="bottom-left">มุมซ้ายล่าง</option>
-                        <option value="bottom-right">มุมขวาล่าง</option>
-                      </select>
+                         <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 pointer-events-none">
+                            <FileType size={32} />
+                         </div>
+                         <div 
+                           className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white"
+                           style={{ 
+                             left: `${dragPos.x * 100}%`, 
+                             top: `${dragPos.y * 100}%`,
+                             transform: 'translate(-50%, -50%)',
+                             boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
+                           }}
+                         >
+                            <Type size={12} />
+                         </div>
+                      </div>
                     </div>
                   </div>
 
