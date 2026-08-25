@@ -2212,14 +2212,9 @@ const PdfWatermark = () => {
                     style={{ 
                       aspectRatio: pdfAspectRatio, 
                       maxHeight: '100%', 
-                      maxWidth: '100%',
-                      cursor: isDragging ? 'grabbing' : 'crosshair'
+                      maxWidth: '100%'
                     }}
                     ref={mapRef}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerUp}
                   >
                     <iframe 
                       src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} 
@@ -2229,7 +2224,11 @@ const PdfWatermark = () => {
                     
                     {/* Draggable HTML Watermark Preview */}
                     <div 
-                      className="absolute pointer-events-none whitespace-pre-wrap font-bold text-black z-10"
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      className="absolute pointer-events-auto whitespace-pre-wrap font-bold text-black z-10 border-2 border-dashed border-indigo-500 hover:bg-indigo-50/30 p-2 cursor-grab active:cursor-grabbing rounded"
                       style={{ 
                         left: `${dragPos.x * 100}%`, 
                         top: `${dragPos.y * 100}%`,
