@@ -1954,6 +1954,7 @@ const PdfWatermark = () => {
   
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const previewTimer = useRef(null);
   const [previewPage, setPreviewPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pdfAspectRatio, setPdfAspectRatio] = useState(1 / 1.414);
@@ -2056,34 +2057,34 @@ const PdfWatermark = () => {
     }
   };
 
+  const generatePreview = async () => {
+    if (!file || !text.trim()) return;
+    setIsPreviewLoading(true);
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      
+      await applyWatermarkToPdf(pdfDoc);
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+    } catch (error) {
+      console.error("Preview error:", error);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadSinglePage = async () => {
-      if (!file) return;
-      setIsPreviewLoading(true);
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdfDoc = await PDFDocument.load(arrayBuffer);
-        const pageCount = pdfDoc.getPageCount();
-        const targetIndex = previewPage - 1;
-        
-        for (let i = pageCount - 1; i >= 0; i--) {
-          if (i !== targetIndex) {
-            pdfDoc.removePage(i);
-          }
-        }
-        
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        setPreviewUrl(URL.createObjectURL(blob));
-      } catch (err) {
-        console.error("Single page preview error", err);
-      } finally {
-        setIsPreviewLoading(false);
-      }
-    };
-    
-    loadSinglePage();
-  }, [file, previewPage]);
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      generatePreview();
+    }, 500); // 500ms debounce
+    return () => clearTimeout(previewTimer.current);
+  }, [file, text, fontSize, opacity, dragPos]);
 
 
 
@@ -2184,6 +2185,36 @@ const PdfWatermark = () => {
                         />
                       </div>
                     </div>
+                    
+                    {/* Drag Map Area */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        ตำแหน่ง (ลากวางได้)
+                      </label>
+                      <div className="w-full aspect-[1/1.414] max-h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 relative overflow-hidden mx-auto touch-none select-none"
+                           ref={mapRef}
+                           onPointerDown={handlePointerDown}
+                           onPointerMove={handlePointerMove}
+                           onPointerUp={handlePointerUp}
+                           onPointerCancel={handlePointerUp}
+                           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                      >
+                         <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 pointer-events-none">
+                            <FileType size={32} />
+                         </div>
+                         <div 
+                           className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white"
+                           style={{ 
+                             left: `${dragPos.x * 100}%`, 
+                             top: `${dragPos.y * 100}%`,
+                             transform: 'translate(-50%, -50%)',
+                             boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
+                           }}
+                         >
+                            <Type size={12} />
+                         </div>
+                      </div>
+                    </div>
                   </div>
 
                   <button
@@ -2214,66 +2245,9 @@ const PdfWatermark = () => {
                 {isPreviewLoading && <span className="flex items-center gap-2 text-xs text-indigo-600"><span className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></span> กำลังเปลี่ยนหน้า...</span>}
               </div>
               
-              {file && (
-                <div className="bg-white px-3 py-2 border-b border-gray-200 flex items-center justify-center gap-4">
-                  <button 
-                    onClick={() => setPreviewPage(p => Math.max(1, p - 1))}
-                    disabled={previewPage <= 1 || isPreviewLoading}
-                    className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
-                  >
-                    ก่อนหน้า
-                  </button>
-                  <span className="text-sm font-medium text-gray-700">หน้าที่ {previewPage} / {totalPages}</span>
-                  <button 
-                    onClick={() => setPreviewPage(p => Math.min(totalPages, p + 1))}
-                    disabled={previewPage >= totalPages || isPreviewLoading}
-                    className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
-                  >
-                    ถัดไป
-                  </button>
-                </div>
-              )}
-
-              <div className="flex-1 relative bg-gray-200 flex items-center justify-center p-4">
+              <div className="flex-1 relative bg-gray-50/50">
                 {previewUrl ? (
-                  <div 
-                    className="relative bg-white shadow-lg touch-none"
-                    style={{ 
-                      aspectRatio: pdfAspectRatio, 
-                      height: '100%',
-                      maxHeight: '100%', 
-                      maxWidth: '100%'
-                    }}
-                    ref={mapRef}
-                  >
-                    <iframe 
-                      src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} 
-                      className="absolute inset-0 w-full h-full border-0 pointer-events-none" 
-                      title="PDF Preview" 
-                    />
-                    
-                    {/* Draggable HTML Watermark Preview */}
-                    <div 
-                      onPointerDown={handlePointerDown}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp}
-                      onPointerCancel={handlePointerUp}
-                      className="absolute pointer-events-auto whitespace-pre-wrap font-bold text-black z-10 border-2 border-dashed border-indigo-500 hover:bg-indigo-50/30 p-2 cursor-grab active:cursor-grabbing rounded"
-                      style={{ 
-                        left: `${dragPos.x * 100}%`, 
-                        top: `${dragPos.y * 100}%`,
-                        transform: 'translate(-50%, -50%)',
-                        opacity: opacity,
-                        fontFamily: 'THSarabunPSK, sans-serif',
-                        fontSize: `${fontSize}pt`,
-                        lineHeight: 1.2,
-                        textAlign: 'left',
-                        width: 'max-content'
-                      }}
-                    >
-                      {text}
-                    </div>
-                  </div>
+                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="w-full h-full border-0" title="PDF Preview" />
                 ) : (
                   <div className="absolute inset-0 flex flex-col gap-3 items-center justify-center text-gray-400">
                     <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></span>
