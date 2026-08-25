@@ -1955,6 +1955,8 @@ const PdfWatermark = () => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const previewTimer = useRef(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   const updateDragPos = (e) => {
     if (!mapRef.current) return;
@@ -2038,6 +2040,7 @@ const PdfWatermark = () => {
       setFile(e.target.files[0]);
       setResultPdf(null);
       setPreviewUrl(null);
+      setPreviewPage(1);
     }
   };
 
@@ -2048,6 +2051,16 @@ const PdfWatermark = () => {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
+      
+      setTotalPages(pdfDoc.getPageCount());
+
+      const pageCount = pdfDoc.getPageCount();
+      const targetIndex = previewPage - 1;
+      for (let i = pageCount - 1; i >= 0; i--) {
+        if (i !== targetIndex) {
+          pdfDoc.removePage(i);
+        }
+      }
       
       await applyWatermarkToPdf(pdfDoc);
 
@@ -2068,7 +2081,7 @@ const PdfWatermark = () => {
       generatePreview();
     }, 500); // 500ms debounce
     return () => clearTimeout(previewTimer.current);
-  }, [file, text, fontSize, opacity, dragPos]);
+  }, [file, text, fontSize, opacity, dragPos, previewPage]);
 
   const processPdf = async () => {
     if (!file) return;
@@ -2223,15 +2236,37 @@ const PdfWatermark = () => {
             {/* Live Preview Column */}
             <div className="flex-1 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden flex flex-col h-[500px] lg:h-auto min-h-[400px]">
               <div className="p-3 bg-white border-b border-gray-200 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700 flex items-center gap-2"><Eye size={16} className="text-gray-400"/> ภาพตัวอย่าง (เฉพาะหน้าแรก)</span>
+                <span className="text-sm font-medium text-gray-700 flex items-center gap-2"><Eye size={16} className="text-gray-400"/> ภาพตัวอย่าง PDF</span>
                 {isPreviewLoading && <span className="flex items-center gap-2 text-xs text-indigo-600"><span className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></span> กำลังอัปเดต...</span>}
               </div>
+              
+              {file && (
+                <div className="bg-white px-3 py-2 border-b border-gray-200 flex items-center justify-center gap-4">
+                  <button 
+                    onClick={() => setPreviewPage(p => Math.max(1, p - 1))}
+                    disabled={previewPage <= 1 || isPreviewLoading}
+                    className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                  >
+                    ก่อนหน้า
+                  </button>
+                  <span className="text-sm font-medium text-gray-700">หน้าที่ {previewPage} / {totalPages}</span>
+                  <button 
+                    onClick={() => setPreviewPage(p => Math.min(totalPages, p + 1))}
+                    disabled={previewPage >= totalPages || isPreviewLoading}
+                    className="px-3 py-1 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                  >
+                    ถัดไป
+                  </button>
+                </div>
+              )}
+
               <div className="flex-1 relative bg-gray-50/50">
                 {previewUrl ? (
-                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`} className="w-full h-full border-0" title="PDF Preview" />
+                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="w-full h-full border-0" title="PDF Preview" />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                    <span className="animate-pulse">กำลังโหลดตัวอย่าง...</span>
+                  <div className="absolute inset-0 flex flex-col gap-3 items-center justify-center text-gray-400">
+                    <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></span>
+                    <span>กำลังโหลดตัวอย่าง...</span>
                   </div>
                 )}
               </div>
