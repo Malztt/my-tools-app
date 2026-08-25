@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import QRCodeStyling from 'qr-code-styling';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -18,7 +19,7 @@ import {
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
   FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical,
   NotebookPen, MessageSquare, Send, Trash2, Maximize2,
-  PanelLeftOpen, PanelRightOpen, PanelRightClose
+  PanelLeftOpen, PanelRightOpen, PanelRightClose, Type
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -1937,12 +1938,214 @@ const PdfSplitter = () => {
   );
 };
 
+// 12. PDF Watermark
+const PdfWatermark = () => {
+  const [file, setFile] = useState(null);
+  const [text, setText] = useState('สำเนาถูกต้อง');
+  const [fontSize, setFontSize] = useState(24);
+  const [opacity, setOpacity] = useState(0.5);
+  const [position, setPosition] = useState('bottom-right');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [resultPdf, setResultPdf] = useState(null);
+  const [statusMsg, setStatusMsg] = useState('');
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+      setResultPdf(null);
+    }
+  };
+
+  const processPdf = async () => {
+    if (!file) return;
+    setIsProcessing(true);
+    setStatusMsg('กำลังเตรียมไฟล์...');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      
+      pdfDoc.registerFontkit(fontkit);
+
+      setStatusMsg('กำลังโหลดฟอนต์ภาษาไทย...');
+      const fontUrl = '/THSarabunPSK.ttf';
+      const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
+      const customFont = await pdfDoc.embedFont(fontBytes);
+
+      setStatusMsg('กำลังใส่ข้อความลงในเอกสาร...');
+      const pages = pdfDoc.getPages();
+      
+      for (const page of pages) {
+        const { width, height } = page.getSize();
+        
+        const textWidth = customFont.widthOfTextAtSize(text, fontSize);
+        const textHeight = customFont.heightAtSize(fontSize);
+        
+        const padding = 20;
+        let x = padding;
+        let y = padding;
+
+        if (position === 'top-left') {
+          y = height - textHeight - padding;
+        } else if (position === 'top-right') {
+          x = width - textWidth - padding;
+          y = height - textHeight - padding;
+        } else if (position === 'center') {
+          x = (width / 2) - (textWidth / 2);
+          y = (height / 2) - (textHeight / 2);
+        } else if (position === 'bottom-right') {
+          x = width - textWidth - padding;
+        }
+
+        page.drawText(text, {
+          x,
+          y,
+          size: fontSize,
+          font: customFont,
+          color: rgb(0, 0, 0),
+          opacity: opacity,
+        });
+      }
+
+      setStatusMsg('กำลังบันทึกไฟล์...');
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      setResultPdf(url);
+      setStatusMsg('เสร็จสิ้น!');
+    } catch (error) {
+      console.error(error);
+      setStatusMsg('เกิดข้อผิดพลาดในการประมวลผล');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
+      <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+        <h2 className="text-xl font-bold flex items-center gap-2"><Type className="text-indigo-600" /> ใส่ข้อความบน PDF (Watermark)</h2>
+        <p className="text-sm text-gray-500 mt-1">ใส่ข้อความ "สำเนาถูกต้อง" (หรือข้อความอื่น) ลงในทุกหน้าของไฟล์ PDF</p>
+      </div>
+      <div className="p-6 flex-1 overflow-y-auto">
+        {!file ? (
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors">
+            <input type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" id="pdf-watermark-upload" />
+            <label htmlFor="pdf-watermark-upload" className="cursor-pointer flex flex-col items-center">
+              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-4"><Upload size={32} /></div>
+              <span className="text-lg font-medium">อัปโหลดไฟล์ PDF</span>
+              <span className="text-sm text-gray-500 mt-1">คลิกที่นี่เพื่อเลือกไฟล์</span>
+            </label>
+          </div>
+        ) : (
+          <div className="space-y-6 max-w-2xl mx-auto">
+            <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between border border-gray-100">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <FileType className="text-indigo-600 shrink-0" size={24} />
+                <span className="font-medium truncate">{file.name}</span>
+                <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{formatSize(file.size)}</span>
+              </div>
+              <button onClick={() => { setFile(null); setResultPdf(null); }} className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button>
+            </div>
+
+            {!resultPdf ? (
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ</label>
+                  <input
+                    type="text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="เช่น สำเนาถูกต้อง"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ขนาดตัวอักษร: {fontSize} pt
+                  </label>
+                  <input
+                    type="range"
+                    min="16"
+                    max="60"
+                    value={fontSize}
+                    onChange={(e) => setFontSize(Number(e.target.value))}
+                    className="w-full accent-indigo-600"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>16</span>
+                    <span>60</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ความโปร่งแสง: {Math.round(opacity * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="1.0"
+                      step="0.1"
+                      value={opacity}
+                      onChange={(e) => setOpacity(Number(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>จาง (10%)</span>
+                      <span>เข้ม (100%)</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">ตำแหน่ง</label>
+                    <select
+                      value={position}
+                      onChange={(e) => setPosition(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                    >
+                      <option value="top-left">มุมซ้ายบน</option>
+                      <option value="top-right">มุมขวาบน</option>
+                      <option value="center">ตรงกลาง</option>
+                      <option value="bottom-left">มุมซ้ายล่าง</option>
+                      <option value="bottom-right">มุมขวาล่าง</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  onClick={processPdf}
+                  disabled={isProcessing || !text.trim()}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Type size={20} /><span>ใส่ข้อความลง PDF</span></>}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4 animate-fade-in">
+                <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center justify-between font-bold text-green-700">
+                  <div className="flex items-center gap-2"><Check size={20} /> <span>ประมวลผลเสร็จสิ้น!</span></div>
+                </div>
+                <div className="flex gap-4">
+                    <a href={resultPdf} download={`watermark-${file.name}`} className="flex-1 block w-full bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-all text-center flex justify-center items-center gap-2"><Download size={18} /> ดาวน์โหลดไฟล์ใหม่</a>
+                    <button onClick={() => { setFile(null); setResultPdf(null); }} className="flex-1 block w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-xl hover:bg-gray-200 transition-all text-center">ทำไฟล์อื่นต่อ</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const tools = [
     // PDF & Image Tools
+    { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type, category: 'PDF & รูปภาพ' },
     { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType, category: 'PDF & รูปภาพ' },
     { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files, category: 'PDF & รูปภาพ' },
     { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors, category: 'PDF & รูปภาพ' },
@@ -2002,6 +2205,7 @@ const App = () => {
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'pdf_split' && <PdfSplitter />}
+            {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
           </div>
         </div>
