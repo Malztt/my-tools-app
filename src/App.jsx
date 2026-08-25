@@ -1957,6 +1957,7 @@ const PdfWatermark = () => {
   const previewTimer = useRef(null);
   const [previewPage, setPreviewPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [pdfAspectRatio, setPdfAspectRatio] = useState(1 / 1.414);
 
   const updateDragPos = (e) => {
     if (!mapRef.current) return;
@@ -2053,6 +2054,10 @@ const PdfWatermark = () => {
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       
       setTotalPages(pdfDoc.getPageCount());
+      if (pdfDoc.getPageCount() > 0) {
+        const { width, height } = pdfDoc.getPages()[0].getSize();
+        setPdfAspectRatio(width / height);
+      }
 
       const pageCount = pdfDoc.getPageCount();
       const targetIndex = previewPage - 1;
@@ -2180,36 +2185,6 @@ const PdfWatermark = () => {
                         />
                       </div>
                     </div>
-                    
-                    {/* Drag Map Area */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        ตำแหน่ง (ลากวางได้)
-                      </label>
-                      <div className="w-full aspect-[1/1.414] max-h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 relative overflow-hidden mx-auto touch-none select-none"
-                           ref={mapRef}
-                           onPointerDown={handlePointerDown}
-                           onPointerMove={handlePointerMove}
-                           onPointerUp={handlePointerUp}
-                           onPointerCancel={handlePointerUp}
-                           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-                      >
-                         <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 pointer-events-none">
-                            <FileType size={32} />
-                         </div>
-                         <div 
-                           className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white"
-                           style={{ 
-                             left: `${dragPos.x * 100}%`, 
-                             top: `${dragPos.y * 100}%`,
-                             transform: 'translate(-50%, -50%)',
-                             boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
-                           }}
-                         >
-                            <Type size={12} />
-                         </div>
-                      </div>
-                    </div>
                   </div>
 
                   <button
@@ -2260,9 +2235,41 @@ const PdfWatermark = () => {
                 </div>
               )}
 
-              <div className="flex-1 relative bg-gray-50/50">
+              <div className="flex-1 relative bg-gray-200 flex items-center justify-center p-4">
                 {previewUrl ? (
-                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="w-full h-full border-0" title="PDF Preview" />
+                  <div 
+                    className="relative bg-white shadow-lg touch-none"
+                    style={{ 
+                      aspectRatio: pdfAspectRatio, 
+                      maxHeight: '100%', 
+                      maxWidth: '100%',
+                      cursor: isDragging ? 'grabbing' : 'crosshair'
+                    }}
+                    ref={mapRef}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                  >
+                    <iframe 
+                      src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} 
+                      className="absolute inset-0 w-full h-full border-0 pointer-events-none" 
+                      title="PDF Preview" 
+                    />
+                    
+                    {/* Draggable Target Indicator */}
+                    <div 
+                      className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white z-10 transition-transform"
+                      style={{ 
+                        left: `${dragPos.x * 100}%`, 
+                        top: `${dragPos.y * 100}%`,
+                        transform: 'translate(-50%, -50%)',
+                        boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
+                      }}
+                    >
+                       <Type size={12} />
+                    </div>
+                  </div>
                 ) : (
                   <div className="absolute inset-0 flex flex-col gap-3 items-center justify-center text-gray-400">
                     <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></span>
