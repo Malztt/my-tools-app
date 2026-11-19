@@ -19,7 +19,9 @@ import {
   Key, Eye, EyeOff, AlertCircle, Search, ExternalLink,
   FileSpreadsheet, Images as ImageIcon, FileType2, Files, GripVertical,
   NotebookPen, MessageSquare, Send, Trash2, Maximize2,
-  PanelLeftOpen, PanelRightOpen, PanelRightClose, Type
+  PanelLeftOpen, PanelRightOpen, PanelRightClose, Type,
+  Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
+  Sparkles, Plus, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -865,60 +867,367 @@ const QRCodeGenerator = () => {
   );
 };
 
-// 5. Gemini OCR (Real API + PDF Support)
+// 5. Gemini OCR (Screen Capture + Interactive Crop + Real API + PDF Support)
 const GeminiOCR = () => {
-  const [apiKey] = useState(() => {
+  const [apiKey, setApiKey] = useState(() => {
     let key = localStorage.getItem('gemini_api_key');
-    // Fix: Purge known bad key from previous version
     if (key === 'AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk') {
       localStorage.removeItem('gemini_api_key');
       key = null;
     }
     return key || import.meta.env.VITE_GEMINI_API_KEY || '';
   });
-  const [image, setImage] = useState(null);
-  const [mimeType, setMimeType] = useState('');
-  const [imageBase64, setImageBase64] = useState(null);
+  const [showKeyInput, setShowKeyInput] = useState(() => !apiKey);
+  const [showKeyText, setShowKeyText] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
+
+  // Source image / PDF state
+  const [image, setImage] = useState(null); // Full image DataURL
+  const [sourceLabel, setSourceLabel] = useState('');
+  const [pdfPages, setPdfPages] = useState([]); // Array of rendered page DataURLs if PDF
+  const [currentPdfPage, setCurrentPdfPage] = useState(0);
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Interactive crop state (normalized 0..1 relative to image element)
+  const [cropRect, setCropRect] = useState(null); // { x, y, w, h }
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [dragStart, setDragStart] = useState(null);
+  const [croppedPreview, setCroppedPreview] = useState(null); // DataURL of cropped region
+  const [croppedPixelSize, setCroppedPixelSize] = useState(null); // { w, h }
+
+  // OCR Options & Output state
+  const [ocrMode, setOcrMode] = useState('standard'); // standard, table, summary, translate_th
+  const [appendMode, setAppendMode] = useState(false);
+  const [autoOcrOnCrop, setAutoOcrOnCrop] = useState(false);
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const fileInputRef = useRef(null);
+  const [copied, setCopied] = useState(false);
+  const [history, setHistory] = useState([]); // [{ id, preview, text, time }]
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const imgRef = useRef(null);
+  const containerRef = useRef(null);
+
+  const ocrPrompts = {
+    standard: 'Extract all text from this image accurately. Preserve the original language (Thai/English), line breaks, and formatting. Output ONLY the extracted text without markdown code fences or extra commentary.',
+    table: 'Extract all text and tabular data from this image. Format tables clearly using Markdown table syntax or structured columns, preserving Thai/English text accurately.',
+    summary: 'Extract the text from this image and provide: 1) The exact extracted text, and 2) A concise bullet-point summary in Thai.',
+    translate_th: 'Extract all text from this image and translate it naturally into Thai. Show both the original text and the Thai translation.'
+  };
+
+  const handleSaveApiKey = (newKey) => {
+    const trimmed = newKey.trim();
+    setApiKey(trimmed);
+    if (trimmed) {
+      localStorage.setItem('gemini_api_key', trimmed);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+    setKeySaved(true);
+    setTimeout(() => setKeySaved(false), 2000);
+  };
+
+  // Load a DataURL image into the workspace
+  const loadWorkspaceImage = (dataUrl, label = 'รูปภาพ') => {
+    setImage(dataUrl);
+    setSourceLabel(label);
+    setCropRect(null);
+    setCroppedPreview(null);
+    setCroppedPixelSize(null);
+    setError('');
+  };
+
+  // Load File (Image or PDF)
+  const processFile = async (file, labelPrefix = 'อัปโหลด') => {
+    if (!file) return;
+    setError('');
+
+    if (file.type === 'application/pdf') {
+      setPdfLoading(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+        const renderedPages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2.0 });
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          renderedPages.push(canvas.toDataURL('image/jpeg', 0.92));
+        }
+        setPdfPages(renderedPages);
+        setCurrentPdfPage(0);
+        if (renderedPages.length > 0) {
+          loadWorkspaceImage(renderedPages[0], `${file.name} (หน้า 1/${renderedPages.length})`);
+        }
+      } catch (err) {
+        setError('ไม่สามารถอ่านไฟล์ PDF ได้: ' + err.message);
+      } finally {
+        setPdfLoading(false);
+      }
+      return;
+    }
+
+    if (file.type.startsWith('image/')) {
+      setPdfPages([]);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setImage(reader.result);
-        setMimeType(file.type);
-        setImageBase64(reader.result.replace("data:", "").replace(/^.+,/, ""));
+        loadWorkspaceImage(reader.result, `${labelPrefix}: ${file.name || 'ภาพถ่าย'}`);
       };
       reader.readAsDataURL(file);
-      setText(''); setError('');
+    } else {
+      setError('รองรับเฉพาะไฟล์รูปภาพ (PNG, JPG, WEBP) หรือ PDF เท่านั้น');
     }
   };
 
-  const handleExtractText = async () => {
-    if (!apiKey) { setError('กรุณากรอก API Key'); return; }
-    if (!imageBase64) return;
-    setLoading(true); setError(''); setText('');
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file, 'ไฟล์');
+    e.target.value = '';
+  };
+
+  // 1. Desktop Screen Capture (getDisplayMedia)
+  const handleScreenCapture = async () => {
+    setError('');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      setError('เบราว์เซอร์บนอุปกรณ์นี้ไม่รองรับการแคปหน้าจอโดยตรง (บนมือถือแนะนำให้แคปหน้าจอแล้วกดปุ่ม "วางรูป" หรือ "เลือกรูป/ถ่ายภาพ")');
+      return;
+    }
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: "Extract all text from this file (Image/PDF). Please preserve the original language (Thai/English)." },
-              { inline_data: { mime_type: mimeType || 'image/jpeg', data: imageBase64 } }
-            ]
-          }]
-        })
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'never' },
+        audio: false
       });
+
+      const track = stream.getVideoTracks()[0];
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+
+      // Wait briefly to ensure video frame is ready
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Stop screen sharing immediately after capturing frame
+      track.stop();
+      stream.getTracks().forEach((t) => t.stop());
+
+      const dataUrl = canvas.toDataURL('image/png');
+      setPdfPages([]);
+      loadWorkspaceImage(dataUrl, 'แคปหน้าจอ (ลากคลุมส่วนที่ต้องการดึงข้อความ)');
+    } catch (err) {
+      if (err.name !== 'NotAllowedError') {
+        setError('ไม่สามารถแคปหน้าจอได้: ' + err.message);
+      }
+    }
+  };
+
+  // 2. Paste from Clipboard button (Mobile & Desktop)
+  const handleClipboardButton = async () => {
+    setError('');
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      setError('กรุณากด Ctrl+V (หรือแตะค้างแล้ววาง) เพื่อวางรูปจากคลิปบอร์ด');
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const file = new File([blob], 'clipboard-image.png', { type: imageType });
+          processFile(file, 'วางจากคลิปบอร์ด');
+          return;
+        }
+      }
+      setError('ไม่พบรูปภาพในคลิปบอร์ด (ลองแคปหน้าจอหรือคัดลอกรูปภาพก่อน)');
+    } catch {
+      setError('เบราว์เซอร์ไม่อนุญาตให้อ่านคลิปบอร์ดอัตโนมัติ กรุณากด Ctrl+V (หรือ Cmd+V) บนหน้าจอนี้ได้เลย');
+    }
+  };
+
+  // Global Paste Event Listener (Ctrl+V / Cmd+V anywhere)
+  useEffect(() => {
+    const handleGlobalPaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            processFile(file, 'วางจากคลิปบอร์ด (Ctrl+V)');
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => window.removeEventListener('paste', handleGlobalPaste);
+  }, []);
+
+  // Switch PDF page
+  const changePdfPage = (newIndex) => {
+    if (newIndex < 0 || newIndex >= pdfPages.length) return;
+    setCurrentPdfPage(newIndex);
+    loadWorkspaceImage(pdfPages[newIndex], `PDF (หน้า ${newIndex + 1}/${pdfPages.length})`);
+  };
+
+  // Compute cropped DataURL from normalized rect { x, y, w, h }
+  const generateCroppedImage = (rect) => {
+    const imgEl = imgRef.current;
+    if (!imgEl || !rect || rect.w < 0.01 || rect.h < 0.01) {
+      setCroppedPreview(null);
+      setCroppedPixelSize(null);
+      return null;
+    }
+    const natW = imgEl.naturalWidth;
+    const natH = imgEl.naturalHeight;
+    const sx = Math.max(0, Math.round(rect.x * natW));
+    const sy = Math.max(0, Math.round(rect.y * natH));
+    const sw = Math.min(natW - sx, Math.max(1, Math.round(rect.w * natW)));
+    const sh = Math.min(natH - sy, Math.max(1, Math.round(rect.h * natH)));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+    const croppedUrl = canvas.toDataURL('image/png');
+    setCroppedPreview(croppedUrl);
+    setCroppedPixelSize({ w: sw, h: sh });
+    return croppedUrl;
+  };
+
+  // Pointer coordinates normalized (0..1) relative to rendered image
+  const getNormalizedCoords = (e) => {
+    const imgEl = imgRef.current;
+    if (!imgEl) return { x: 0, y: 0 };
+    const bounds = imgEl.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - bounds.left) / bounds.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - bounds.top) / bounds.height));
+    return { x, y };
+  };
+
+  const handlePointerDown = (e) => {
+    if (!image || loading) return;
+    // Only primary mouse button or touch
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const coords = getNormalizedCoords(e);
+    setIsSelecting(true);
+    setDragStart(coords);
+    setCropRect({ x: coords.x, y: coords.y, w: 0, h: 0 });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!isSelecting || !dragStart) return;
+    e.preventDefault();
+    const coords = getNormalizedCoords(e);
+    const x = Math.min(dragStart.x, coords.x);
+    const y = Math.min(dragStart.y, coords.y);
+    const w = Math.abs(coords.x - dragStart.x);
+    const h = Math.abs(coords.y - dragStart.y);
+    setCropRect({ x, y, w, h });
+  };
+
+  const handlePointerUp = (e) => {
+    if (!isSelecting) return;
+    setIsSelecting(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore if not captured
+    }
+    if (!cropRect || cropRect.w < 0.015 || cropRect.h < 0.015) {
+      // Too small click -> clear selection (use full image)
+      setCropRect(null);
+      setCroppedPreview(null);
+      setCroppedPixelSize(null);
+      return;
+    }
+    const croppedUrl = generateCroppedImage(cropRect);
+    if (autoOcrOnCrop && croppedUrl) {
+      handleExtractText(croppedUrl);
+    }
+  };
+
+  const clearSelection = () => {
+    setCropRect(null);
+    setCroppedPreview(null);
+    setCroppedPixelSize(null);
+  };
+
+  // Run Gemini OCR on either cropped region or full image
+  const handleExtractText = async (overrideDataUrl = null) => {
+    if (!apiKey) {
+      setShowKeyInput(true);
+      setError('กรุณาใส่ Gemini API Key ด้านบนก่อนเริ่มดึงข้อความ');
+      return;
+    }
+    const targetDataUrl = overrideDataUrl || croppedPreview || image;
+    if (!targetDataUrl) return;
+
+    setLoading(true);
+    setError('');
+    if (!appendMode) setText('');
+
+    try {
+      const base64Data = targetDataUrl.replace(/^data:.+;base64,/, '');
+      const detectedMime = targetDataUrl.match(/^data:([^;]+);/)?.[1] || 'image/png';
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: ocrPrompts[ocrMode] || ocrPrompts.standard },
+                  { inline_data: { mime_type: detectedMime, data: base64Data } }
+                ]
+              }
+            ]
+          })
+        }
+      );
+
       const data = await response.json();
       if (data.error) throw new Error(data.error.message);
-      setText(data.candidates?.[0]?.content?.parts?.[0]?.text || 'No text found');
+
+      const extracted = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+      if (!extracted) {
+        throw new Error('ไม่พบข้อความในบริเวณที่เลือก ลองลากคลุมพื้นที่ให้กว้างขึ้น');
+      }
+
+      setText((prev) => (appendMode && prev ? `${prev}\n\n---\n${extracted}` : extracted));
+
+      // Save to session history
+      setHistory((prev) => [
+        {
+          id: Date.now(),
+          preview: targetDataUrl,
+          text: extracted,
+          isCropped: Boolean(overrideDataUrl || croppedPreview),
+          time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        },
+        ...prev.slice(0, 9)
+      ]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -926,33 +1235,534 @@ const GeminiOCR = () => {
     }
   };
 
-  return (
-    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2"><h2 className="text-2xl font-bold text-gray-800">Gemini OCR (AI)</h2></div>
+  const handleCopyText = () => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-      <div className="space-y-6">
-        <div onClick={() => !image && fileInputRef.current.click()} className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center min-h-[200px] ${!image ? 'cursor-pointer hover:bg-gray-50' : ''}`}>
-          {!image ? <><FileText size={48} className="text-indigo-300 mb-4" /><p>อัปโหลด รูปภาพ หรือ PDF</p><input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleFileUpload} className="hidden" /></> :
-            <div className="w-full max-w-md mx-auto space-y-4">
-              <div className="relative h-48 bg-gray-900 rounded-xl overflow-hidden flex justify-center items-center">
-                {mimeType === 'application/pdf' ? (
-                  <div className="text-white flex flex-col items-center">
-                    <FileType size={48} className="text-red-400 mb-2" />
-                    <span className="text-sm">PDF Document Selected</span>
-                  </div>
-                ) : (
-                  <img src={image} className="h-full object-contain" />
-                )}
-                <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full"><X size={16} /></button>
-              </div>
-              <button onClick={handleExtractText} disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl flex justify-center items-center gap-2">{loading ? 'กำลังอ่าน...' : 'เริ่มอ่านข้อความ'}</button>
+  const handleShareText = async () => {
+    if (!text) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'ข้อความจาก OCR', text });
+      } catch {
+        // user cancelled share
+      }
+    } else {
+      handleCopyText();
+    }
+  };
+
+  const handleDownloadTxt = () => {
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    saveAs(blob, `ocr-text-${new Date().toISOString().slice(0, 10)}.txt`);
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header & API Key Toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+              <Crop size={20} />
             </div>
-          }
+            <div>
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                แคปหน้าจอ & เลือกส่วนดึงข้อความ (AI OCR)
+                <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">
+                  PC & มือถือ
+                </span>
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                แคปหน้าจอ วางรูป (Ctrl+V) หรือถ่ายภาพ แล้วลากคลุมเฉพาะกรอบข้อความที่ต้องการนำออกไปใช้
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col">
-          <div className="flex justify-between mb-4"><h3 className="font-medium text-gray-700">ผลลัพธ์ข้อความ</h3><button onClick={() => navigator.clipboard.writeText(text)} disabled={!text} className="text-indigo-600 text-sm flex gap-1"><Copy size={16} /> คัดลอก</button></div>
-          {error ? <div className="text-red-500 text-center mt-10"><AlertCircle size={32} className="mx-auto mb-2" />{error}</div> : <textarea readOnly value={text} placeholder="ข้อความที่ดึงได้จะปรากฏที่นี่..." className="w-full p-4 bg-gray-50 rounded-xl border-gray-200 resize-none min-h-[300px] text-base leading-relaxed" />}
+        <button
+          onClick={() => setShowKeyInput(!showKeyInput)}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-all self-start sm:self-auto ${
+            apiKey
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+          }`}
+        >
+          <Key size={15} />
+          <span>{apiKey ? 'ตั้งค่า API Key แล้ว' : 'ใส่ Gemini API Key'}</span>
+        </button>
+      </div>
+
+      {/* Collapsible API Key Bar */}
+      {showKeyInput && (
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+              <Key size={14} className="text-indigo-600" />
+              Gemini API Key (บันทึกไว้ในเครื่องของคุณอัตโนมัติ)
+            </label>
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-indigo-600 hover:underline flex items-center gap-1"
+            >
+              <span>ขอรับฟรีที่ Google AI Studio</span>
+              <ExternalLink size={12} />
+            </a>
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type={showKeyText ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => handleSaveApiKey(e.target.value)}
+                placeholder="วาง Gemini API Key ของคุณที่นี่ (AIzaSy...)"
+                className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKeyText(!showKeyText)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showKeyText ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowKeyInput(false)}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-xl transition-all flex items-center gap-1.5"
+            >
+              {keySaved ? <Check size={15} /> : null}
+              <span>พร้อมใช้งาน</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Action Bar: 4 Capture / Input Methods */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* 1. Screen Capture (PC) */}
+        <button
+          type="button"
+          onClick={handleScreenCapture}
+          className="flex flex-col items-center justify-center gap-2 p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl shadow-sm shadow-indigo-100 transition-all group"
+        >
+          <Monitor size={24} className="group-hover:scale-110 transition-transform" />
+          <div className="text-center">
+            <div className="text-sm font-semibold">แคปหน้าจอทันที</div>
+            <div className="text-[11px] text-indigo-100">เลือกหน้าต่าง/แท็บ (บนคอม)</div>
+          </div>
+        </button>
+
+        {/* 2. Paste from Clipboard (PC & Mobile) */}
+        <button
+          type="button"
+          onClick={handleClipboardButton}
+          className="flex flex-col items-center justify-center gap-2 p-4 bg-white hover:bg-indigo-50/60 text-gray-800 rounded-2xl shadow-sm border border-gray-200 hover:border-indigo-300 transition-all group"
+        >
+          <Clipboard size={24} className="text-indigo-600 group-hover:scale-110 transition-transform" />
+          <div className="text-center">
+            <div className="text-sm font-semibold">วางรูปจากคลิปบอร์ด</div>
+            <div className="text-[11px] text-gray-500">หรือกด Ctrl+V / วางบนมือถือ</div>
+          </div>
+        </button>
+
+        {/* 3. Mobile Camera Capture */}
+        <button
+          type="button"
+          onClick={() => cameraInputRef.current?.click()}
+          className="flex flex-col items-center justify-center gap-2 p-4 bg-white hover:bg-indigo-50/60 text-gray-800 rounded-2xl shadow-sm border border-gray-200 hover:border-indigo-300 transition-all group"
+        >
+          <Camera size={24} className="text-indigo-600 group-hover:scale-110 transition-transform" />
+          <div className="text-center">
+            <div className="text-sm font-semibold">ถ่ายภาพ / สแกน</div>
+            <div className="text-[11px] text-gray-500">เปิดกล้องมือถือถ่ายแล้วเลือกส่วน</div>
+          </div>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+        </button>
+
+        {/* 4. Upload Image or PDF */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex flex-col items-center justify-center gap-2 p-4 bg-white hover:bg-indigo-50/60 text-gray-800 rounded-2xl shadow-sm border border-gray-200 hover:border-indigo-300 transition-all group"
+        >
+          <Upload size={24} className="text-indigo-600 group-hover:scale-110 transition-transform" />
+          <div className="text-center">
+            <div className="text-sm font-semibold">เลือกรูป / PDF</div>
+            <div className="text-[11px] text-gray-500">คลังภาพมือถือ หรือไฟล์ในเครื่อง</div>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+        </button>
+      </div>
+
+      {/* Main Two-Column Workspace: Left = Interactive Crop Canvas, Right = Extracted Text */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Image / Screen Crop Workspace (7 cols) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+          {/* Workspace Toolbar */}
+          <div className="p-3.5 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                <Crop size={15} className="text-indigo-600" />
+                {image ? sourceLabel || 'ลากคลุมส่วนที่ต้องการบนภาพ' : 'พื้นที่เลือกส่วนภาพ (Region Crop)'}
+              </span>
+              {croppedPixelSize && (
+                <span className="text-[11px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono">
+                  {croppedPixelSize.w} × {croppedPixelSize.h} px
+                </span>
+              )}
+            </div>
+
+            {image && (
+              <div className="flex items-center gap-2">
+                {cropRect && (
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 flex items-center gap-1"
+                  >
+                    <RotateCcw size={12} />
+                    <span>ใช้ทั้งภาพ</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImage(null);
+                    setCropRect(null);
+                    setCroppedPreview(null);
+                    setPdfPages([]);
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                >
+                  <Trash2 size={12} />
+                  <span>ล้างรูป</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* PDF Page Switcher if PDF loaded */}
+          {pdfPages.length > 1 && (
+            <div className="px-4 py-2 bg-indigo-50/70 border-b border-indigo-100 flex items-center justify-between text-xs">
+              <span className="font-medium text-indigo-800">
+                เอกสาร PDF ({pdfPages.length} หน้า) — เลือกหน้าแล้วลากคลุมจุดที่ต้องการได้
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => changePdfPage(currentPdfPage - 1)}
+                  disabled={currentPdfPage === 0}
+                  className="p-1 rounded-lg bg-white border border-indigo-200 text-indigo-700 disabled:opacity-40"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <span className="px-2 font-semibold text-indigo-900">
+                  หน้า {currentPdfPage + 1} / {pdfPages.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => changePdfPage(currentPdfPage + 1)}
+                  disabled={currentPdfPage === pdfPages.length - 1}
+                  className="p-1 rounded-lg bg-white border border-indigo-200 text-indigo-700 disabled:opacity-40"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Interactive Canvas Container */}
+          <div className="p-4 flex flex-col items-center justify-center min-h-[340px] bg-slate-900/95 relative">
+            {pdfLoading ? (
+              <div className="text-center text-white space-y-3 py-12">
+                <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-indigo-400 mx-auto"></div>
+                <p className="text-sm text-slate-300">กำลังแปลงหน้า PDF เป็นภาพความละเอียดสูง...</p>
+              </div>
+            ) : !image ? (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) processFile(file, 'ลากวางไฟล์');
+                }}
+                className="w-full h-72 border-2 border-dashed border-slate-700 hover:border-indigo-400 rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer transition-colors"
+              >
+                <Crop size={42} className="text-indigo-400 mb-3" />
+                <p className="text-white font-medium text-sm">
+                  กดปุ่ม &ldquo;แคปหน้าจอทันที&rdquo; ด้านบน หรือกด <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-xs">Ctrl+V</kbd> เพื่อวางภาพ
+                </p>
+                <p className="text-slate-400 text-xs mt-1.5 max-w-md">
+                  บนมือถือ: แคปหน้าจอแล้วกดปุ่ม &ldquo;วางรูปจากคลิปบอร์ด&rdquo; หรือเลือกรูปจากคลังภาพ แล้วใช้นิ้วลากคลุมเฉพาะข้อความที่ต้องการ
+                </p>
+              </div>
+            ) : (
+              <div className="w-full flex flex-col items-center space-y-3">
+                {/* Instruction banner above image */}
+                <div className="w-full flex items-center justify-between text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-lg">
+                  <span>💡 ใช้เมาส์หรือนิ้วลากคลุมกรอบข้อความที่ต้องการ (หากไม่ลากจะอ่านทั้งภาพ)</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-indigo-300 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={autoOcrOnCrop}
+                      onChange={(e) => setAutoOcrOnCrop(e.target.checked)}
+                      className="rounded accent-indigo-500"
+                    />
+                    <span>ลากปุ๊บอ่านปั๊บ (Auto)</span>
+                  </label>
+                </div>
+
+                {/* Touch & Mouse Interactive Wrapper */}
+                <div
+                  ref={containerRef}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  className="relative inline-block max-w-full overflow-hidden rounded-lg select-none touch-none cursor-crosshair border border-slate-700"
+                >
+                  <img
+                    ref={imgRef}
+                    src={image}
+                    alt="OCR Workspace"
+                    draggable={false}
+                    className="block max-h-[480px] w-auto max-w-full object-contain pointer-events-none select-none"
+                  />
+
+                  {/* Selection Box Overlay */}
+                  {cropRect && cropRect.w > 0.005 && cropRect.h > 0.005 && (
+                    <div
+                      className="absolute border-2 border-indigo-400 pointer-events-none"
+                      style={{
+                        left: `${cropRect.x * 100}%`,
+                        top: `${cropRect.y * 100}%`,
+                        width: `${cropRect.w * 100}%`,
+                        height: `${cropRect.h * 100}%`,
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.58)'
+                      }}
+                    >
+                      {/* Corner Handles */}
+                      <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
+                      <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
+                      <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
+                      <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Controls of Left Column: Cropped Preview + Mode + Trigger Button */}
+          {image && (
+            <div className="p-4 bg-white border-t border-gray-100 space-y-4">
+              {croppedPreview && (
+                <div className="flex items-center gap-3 p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-xl">
+                  <img
+                    src={croppedPreview}
+                    alt="Cropped region"
+                    className="h-14 max-w-[140px] object-contain rounded border border-indigo-200 bg-white"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-indigo-900">
+                      เลือกเฉพาะส่วนแล้ว ({croppedPixelSize?.w} × {croppedPixelSize?.h} px)
+                    </div>
+                    <div className="text-[11px] text-indigo-600">
+                      ระบบจะส่งเฉพาะกรอบที่เลือกนี้ไปดึงข้อความ ทำให้เร็วและแม่นยำขึ้น
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">รูปแบบการดึงข้อมูล</label>
+                  <select
+                    value={ocrMode}
+                    onChange={(e) => setOcrMode(e.target.value)}
+                    className="w-full p-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:border-indigo-500 outline-none"
+                  >
+                    <option value="standard">ข้อความทั่วไป (คงรูปแบบเดิม)</option>
+                    <option value="table">ตาราง / แยกคอลัมน์</option>
+                    <option value="summary">ดึงข้อความ + สรุปใจความสำคัญ</option>
+                    <option value="translate_th">ดึงข้อความ + แปลเป็นภาษาไทย</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col justify-end">
+                  <label className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50 text-xs font-medium text-gray-700 h-[42px]">
+                    <input
+                      type="checkbox"
+                      checked={appendMode}
+                      onChange={(e) => setAppendMode(e.target.checked)}
+                      className="rounded accent-indigo-600 w-4 h-4"
+                    />
+                    <span>นำข้อความไปต่อท้ายผลลัพธ์เดิม (Append)</span>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleExtractText()}
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-indigo-100 transition-all flex justify-center items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span>
+                    <span>กำลังดึงข้อความด้วย Gemini AI...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={19} />
+                    <span>
+                      {croppedPreview ? 'ดึงข้อความจากส่วนที่เลือก' : 'ดึงข้อความจากทั้งภาพ'}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column: Extracted Text & Export Tools (5 cols) */}
+        <div className="lg:col-span-5 bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-gray-800 text-base">ข้อความที่ดึงได้ (แก้ไขต่อได้)</h3>
+              <p className="text-xs text-gray-400">
+                {text ? `${text.length} ตัวอักษร • ${text.split('\n').length} บรรทัด` : 'พร้อมนำไปคัดลอก แชร์ หรือดาวน์โหลด'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopyText}
+                disabled={!text}
+                className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 disabled:opacity-40 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                <span>{copied ? 'คัดลอกแล้ว!' : 'คัดลอก'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleShareText}
+                disabled={!text}
+                title="แชร์ไปยังแอปอื่น (เช่น LINE, Notes)"
+                className="p-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-40 text-xs transition-all"
+              >
+                <Share2 size={15} />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadTxt}
+                disabled={!text}
+                title="ดาวน์โหลดไฟล์ .txt"
+                className="p-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-40 text-xs transition-all"
+              >
+                <Download size={15} />
+              </button>
+
+              {text && (
+                <button
+                  type="button"
+                  onClick={() => setText('')}
+                  title="ล้างข้อความ"
+                  className="p-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-xs transition-all"
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs flex items-start gap-2.5">
+              <AlertCircle size={18} className="shrink-0 mt-0.5" />
+              <div className="flex-1">{error}</div>
+            </div>
+          )}
+
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="ข้อความที่ดึงจากส่วนที่เลือกจะแสดงที่นี่... (สามารถพิมพ์แก้ไขเพิ่มเติมก่อนนำไปใช้ได้เลย)"
+            className="w-full p-4 bg-gray-50 focus:bg-white rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none resize-y min-h-[290px] text-sm leading-relaxed transition-all"
+          />
+
+          {/* Recent Extractions History */}
+          {history.length > 0 && (
+            <div className="pt-2 border-t border-gray-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-500">
+                  ประวัติที่ดึงล่าสุด ({history.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setHistory([])}
+                  className="text-[11px] text-gray-400 hover:text-red-500"
+                >
+                  ล้างประวัติ
+                </button>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2.5 p-2 rounded-xl bg-gray-50 hover:bg-indigo-50/50 border border-gray-100 text-xs group"
+                  >
+                    <img
+                      src={item.preview}
+                      alt="thumb"
+                      className="w-10 h-10 object-cover rounded border border-gray-200 bg-white shrink-0"
+                    />
+                    <div
+                      onClick={() => setText(item.text)}
+                      className="flex-1 min-w-0 cursor-pointer"
+                    >
+                      <div className="truncate font-medium text-gray-700">{item.text}</div>
+                      <div className="text-[10px] text-gray-400">
+                        {item.time} • {item.isCropped ? 'เฉพาะส่วน' : 'ทั้งภาพ'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setText((prev) => (prev ? `${prev}\n${item.text}` : item.text))}
+                      title="นำข้อความนี้ไปต่อท้าย"
+                      className="p-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200"
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
