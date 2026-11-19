@@ -21,7 +21,7 @@ import {
   NotebookPen, MessageSquare, Send, Trash2, Maximize2,
   PanelLeftOpen, PanelRightOpen, PanelRightClose, Type,
   Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
-  Sparkles, Plus, ChevronLeft, ChevronRight
+  Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -568,13 +568,24 @@ const QRCodeGenerator = () => {
                   <div className="space-y-4">
                     <label className="text-sm font-medium text-gray-700 block">เลือกโลโก้มาตรฐาน</label>
                     <div className="flex gap-3">
-                      {['/default-logo-1.png', '/default-logo-2.png'].map((l, i) => (
+                      {['./default-logo-1.png', './default-logo-2.png'].map((l, i) => (
                         <button
                           key={i}
-                          onClick={() => setLogo(l)}
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(l);
+                              const blob = await res.blob();
+                              const reader = new FileReader();
+                              reader.onloadend = () => setLogo(reader.result);
+                              reader.readAsDataURL(blob);
+                            } catch {
+                              setLogo(l);
+                            }
+                          }}
                           className="w-16 h-16 border border-gray-200 rounded-lg p-2 hover:border-indigo-500 hover:bg-indigo-50 transition-all bg-white"
                         >
-                          <img src={l} className="w-full h-full object-contain" alt="Default Logo" />
+                          <img src={l} className="w-full h-full object-contain" alt={`Default Logo ${i + 1}`} />
                         </button>
                       ))}
                     </div>
@@ -1236,7 +1247,7 @@ const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
             </div>
             <div>
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 flex-wrap">
-                <span>แคปหน้าจอ & เลือกส่วนดึงข้อความ (AI OCR)</span>
+                <span>ดึงข้อความ OCR</span>
                 <span className="text-xs bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full font-medium">
                   {isElectron ? 'Windows Desktop App' : 'PC & มือถือ'}
                 </span>
@@ -2784,7 +2795,7 @@ const PdfWatermark = () => {
 
   const applyWatermarkToPdf = async (pdfDoc) => {
     pdfDoc.registerFontkit(fontkit);
-    const fontUrl = '/THSarabunPSK.ttf';
+    const fontUrl = './THSarabunPSK.ttf';
     const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
     const customFont = await pdfDoc.embedFont(fontBytes);
 
@@ -3050,71 +3061,253 @@ const PdfWatermark = () => {
 
 // --- Main Layout ---
 const App = () => {
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingSnip, setPendingSnip] = useState(null);
 
+  // Dark / Light Mode state
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('worktools_theme');
+    return saved === 'dark';
+  });
+
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.electronAPI?.onSnipCaptured) {
-      const unsubscribe = window.electronAPI.onSnipCaptured((payload) => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+      localStorage.setItem('worktools_theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('worktools_theme', 'light');
+    }
+  }, [darkMode]);
+
+  // Auto-Update State (Portable & Desktop)
+  const [appVersion, setAppVersion] = useState('1.0.0');
+  const [updateInfo, setUpdateInfo] = useState(null); // { hasUpdate, latestVersion, downloadUrl, releaseUrl }
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updatingProgress, setUpdatingProgress] = useState(null); // { percent, status }
+  const [updateStatusMsg, setUpdateStatusMsg] = useState('');
+
+  const handleCheckUpdate = async (silent = false) => {
+    if (!silent) {
+      setCheckingUpdate(true);
+      setUpdateStatusMsg('');
+    }
+    try {
+      if (isElectron && window.electronAPI?.checkForUpdates) {
+        const res = await window.electronAPI.checkForUpdates();
+        if (res?.currentVersion) setAppVersion(res.currentVersion);
+        if (res?.hasUpdate) {
+          setUpdateInfo(res);
+          setUpdateStatusMsg(`พบเวอร์ชันใหม่ v${res.latestVersion}`);
+        } else if (!silent) {
+          setUpdateInfo(null);
+          setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
+          setTimeout(() => setUpdateStatusMsg(''), 3000);
+        }
+      } else {
+        // Fallback check via GitHub API on Web
+        const response = await fetch('https://api.github.com/repos/Malztt/my-tools-app/releases/latest');
+        if (response.ok) {
+          const data = await response.json();
+          const latestVer = String(data.tag_name || '').replace(/^v/i, '');
+          if (!silent) {
+            setUpdateStatusMsg(latestVer ? `เวอร์ชันล่าสุด v${latestVer}` : 'เป็นเวอร์ชันล่าสุดแล้ว');
+            setTimeout(() => setUpdateStatusMsg(''), 3000);
+          }
+        } else if (!silent) {
+          setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
+          setTimeout(() => setUpdateStatusMsg(''), 3000);
+        }
+      }
+    } catch {
+      if (!silent) {
+        setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
+        setTimeout(() => setUpdateStatusMsg(''), 3000);
+      }
+    } finally {
+      if (!silent) setCheckingUpdate(false);
+    }
+  };
+
+  const handleStartAutoUpdate = async () => {
+    if (!updateInfo?.downloadUrl || !isElectron) return;
+    setUpdatingProgress({ percent: 1, status: 'downloading' });
+    setUpdateStatusMsg('กำลังดาวน์โหลดอัปเดต...');
+    const res = await window.electronAPI.downloadAndInstallUpdate(updateInfo.downloadUrl);
+    if (!res?.success) {
+      setUpdatingProgress(null);
+      setUpdateStatusMsg(res?.error || 'อัปเดตไม่สำเร็จ');
+    }
+  };
+
+  useEffect(() => {
+    if (isElectron) {
+      window.electronAPI.getAppInfo?.().then((info) => {
+        if (info?.version) setAppVersion(info.version);
+      });
+      handleCheckUpdate(true);
+
+      const unsubProgress = window.electronAPI.onUpdateProgress?.((data) => {
+        setUpdatingProgress(data);
+        if (data.status === 'restarting') {
+          setUpdateStatusMsg('ติดตั้งสำเร็จ กำลังเปิดโปรแกรมใหม่...');
+        }
+      });
+
+      const unsubSnip = window.electronAPI.onSnipCaptured?.((payload) => {
         setActiveTab('ocr');
         setPendingSnip(payload);
       });
+
       return () => {
-        if (typeof unsubscribe === 'function') unsubscribe();
+        if (typeof unsubProgress === 'function') unsubProgress();
+        if (typeof unsubSnip === 'function') unsubSnip();
       };
     }
-  }, []);
+  }, [isElectron]);
 
   const tools = [
-    // PDF & Image Tools
-    { id: 'ocr', label: 'แคปจอ & ดึงข้อความ (OCR)', icon: Zap, category: 'PDF & รูปภาพ' },
-    { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type, category: 'PDF & รูปภาพ' },
-    { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType, category: 'PDF & รูปภาพ' },
-    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files, category: 'PDF & รูปภาพ' },
-    { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors, category: 'PDF & รูปภาพ' },
-    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2, category: 'PDF & รูปภาพ' },
-    { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage, category: 'PDF & รูปภาพ' },
-
-    // General Tools
-    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet, category: 'เครื่องมือทั่วไป' },
-    { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode, category: 'เครื่องมือทั่วไป' },
+    { id: 'ocr', label: 'ดึงข้อความ OCR', icon: Zap },
+    { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type },
+    { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType },
+    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
+    { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors },
+    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
+    { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
+    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
+    { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex">
+    <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex transition-colors duration-200">
       {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 h-full flex flex-col">
-          <div className="flex items-center gap-3 mb-10"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white"><Layout size={24} /></div><div><h1 className="font-bold text-xl">WorkTools</h1><p className="text-xs text-gray-400">Real & Functional</p></div></div>
-          <nav className="space-y-6">
-            {['PDF & รูปภาพ', 'เครื่องมือทั่วไป'].map((category) => (
-              <div key={category}>
-                <h3 className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                  {category}
-                </h3>
-                <div className="space-y-1">
-                  {tools.filter(t => t.category === category).map((tool) => (
-                    <button
-                      key={tool.id}
-                      onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
-                      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
-                        ? 'bg-indigo-50 text-indigo-600 shadow-sm'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                        }`}
-                    >
-                      <tool.icon size={20} />
-                      <span className="font-medium">{tool.label}</span>
-                    </button>
-                  ))}
+        <div className="p-5 h-full flex flex-col justify-between">
+          <div className="overflow-y-auto pr-1">
+            {/* Brand Header with Custom Anvil Icon */}
+            <div className="flex items-center justify-between mb-8 px-1">
+              <div className="flex items-center gap-3">
+                <img
+                  src="./anvil.webp"
+                  alt="WorkTools Icon"
+                  className="w-11 h-11 object-contain drop-shadow-sm select-none"
+                />
+                <div>
+                  <h1 className="font-bold text-xl leading-tight">WorkTools</h1>
+                  <p className="text-[11px] text-gray-400 font-mono">v{appVersion} {isElectron ? 'Portable' : ''}</p>
                 </div>
               </div>
-            ))}
-          </nav>
+
+              {/* Quick Theme Toggle Button */}
+              <button
+                type="button"
+                onClick={() => setDarkMode(!darkMode)}
+                title={darkMode ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+                className="p-2 rounded-xl border border-gray-200 hover:bg-gray-100 text-gray-600 transition-all"
+              >
+                {darkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
+              </button>
+            </div>
+
+            {/* Unified Menu List (No Category Split) */}
+            <nav className="space-y-1.5">
+              {tools.map((tool) => (
+                <button
+                  key={tool.id}
+                  onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
+                    ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                >
+                  <tool.icon size={20} />
+                  <span className="font-medium text-sm">{tool.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Sidebar Footer: Dark/Light Toggle & Portable Auto-Updater */}
+          <div className="pt-4 border-t border-gray-100 space-y-2.5">
+            {/* Dark/Light Mode Full Button */}
+            <button
+              type="button"
+              onClick={() => setDarkMode(!darkMode)}
+              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-medium text-gray-700 transition-all"
+            >
+              <span className="flex items-center gap-2">
+                {darkMode ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-indigo-600" />}
+                <span>{darkMode ? 'โหมดมืด (Dark Mode)' : 'โหมดสว่าง (Light Mode)'}</span>
+              </span>
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-gray-100 text-gray-600">
+                สลับสี
+              </span>
+            </button>
+
+            {/* Auto-Update Status & Trigger */}
+            <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500 font-medium">ระบบอัปเดตอัตโนมัติ</span>
+                <button
+                  type="button"
+                  onClick={() => handleCheckUpdate(false)}
+                  disabled={checkingUpdate || Boolean(updatingProgress)}
+                  className="text-indigo-600 hover:underline flex items-center gap-1 font-medium disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : ''} />
+                  <span>{checkingUpdate ? 'กำลังเช็ก...' : 'เช็กอัปเดต'}</span>
+                </button>
+              </div>
+
+              {updateStatusMsg && (
+                <p className="text-[11px] text-indigo-600 font-medium">{updateStatusMsg}</p>
+              )}
+
+              {updatingProgress ? (
+                <div className="space-y-1">
+                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-600 transition-all duration-200"
+                      style={{ width: `${updatingProgress.percent}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-right text-gray-500 font-mono">
+                    {updatingProgress.percent}%
+                  </div>
+                </div>
+              ) : updateInfo?.hasUpdate ? (
+                <button
+                  type="button"
+                  onClick={handleStartAutoUpdate}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw size={13} />
+                  <span>อัปเดตเป็น v{updateInfo.latestVersion} ทันที</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       </aside>
+
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="bg-white border-b border-gray-200 p-4 flex items-center md:hidden"><button onClick={() => setSidebarOpen(true)} className="p-2"><Menu size={24} /></button><span className="ml-4 font-bold">WorkTools</span></header>
+        <header className="bg-white border-b border-gray-200 p-3.5 flex items-center justify-between md:hidden">
+          <div className="flex items-center">
+            <button onClick={() => setSidebarOpen(true)} className="p-2"><Menu size={24} /></button>
+            <img src="./anvil.webp" alt="WorkTools" className="w-7 h-7 object-contain ml-2" />
+            <span className="ml-2 font-bold">WorkTools</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2 rounded-xl border border-gray-200 text-gray-600"
+          >
+            {darkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
+          </button>
+        </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto">
             {activeTab === 'compress_img' && <ImageCompressor />}

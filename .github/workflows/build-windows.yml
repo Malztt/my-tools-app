@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -19,16 +22,32 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Stamp build version (1.0.<run_number>)
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version
+
       - name: Install dependencies
         run: npm install
 
-      - name: Build Windows .exe (Portable & Installer)
+      - name: Build Windows Portable .exe
         run: npm run electron:build
 
-      - name: Upload Windows .exe Artifacts
+      - name: Upload Windows Portable .exe Artifact
         uses: actions/upload-artifact@v4
         with:
           name: WorkTools-Windows-EXE
           path: |
-            release/*.exe
+            release/*Portable.exe
           if-no-files-found: error
+
+      - name: Publish Portable .exe to GitHub Releases (for Auto-Update)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: WorkTools v1.0.${{ github.run_number }} (Portable)
+          body: "Automated Windows Portable build from commit ${{ github.sha }}"
+          files: |
+            release/*Portable.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

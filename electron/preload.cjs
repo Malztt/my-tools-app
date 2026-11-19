@@ -6,6 +6,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHotkey: () => ipcRenderer.invoke('get-hotkey'),
   setHotkey: (hotkey) => ipcRenderer.invoke('set-hotkey', hotkey),
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadAndInstallUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
+  onUpdateProgress: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('update-progress', listener);
+    return () => ipcRenderer.removeListener('update-progress', listener);
+  },
   onSnipCaptured: (callback) => {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('snip-captured', listener);
