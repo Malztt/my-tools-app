@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:start": "vite build && electron .",
-    "electron:build": "vite build && electron-builder --win"
+    "electron:build": "vite build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
