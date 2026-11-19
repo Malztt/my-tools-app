@@ -35,116 +35,6 @@ const formatSize = (bytes) => {
 
 // --- Components ---
 
-// 1. REAL URL Shortener (Multi-Provider)
-// 1. REAL URL Shortener (Multi-Provider)
-const UrlShortener = () => {
-  const [url, setUrl] = useState('');
-  const [shortUrl, setShortUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState('');
-  const [provider, setProvider] = useState('tinyurl');
-
-  const providers = {
-    tinyurl: { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=', limit: 'ไม่จำกัด (Unlimited)' },
-    clckru: { name: 'Clck.ru', url: 'https://clck.ru/--?url=', limit: 'ไม่ระบุ (Unspecified)', useProxy: true },
-  };
-
-  const handleShorten = async (e) => {
-    e.preventDefault();
-    if (!url) return;
-    setLoading(true);
-    setError('');
-    setShortUrl('');
-
-    try {
-      let targetUrl = providers[provider].url + encodeURIComponent(url);
-
-      // Use proxy if required by provider
-      if (providers[provider].useProxy) {
-        targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      }
-
-      const response = await fetch(targetUrl);
-
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      const result = await response.text();
-      setShortUrl(result);
-    } catch (err) {
-      console.error(err);
-      setError(`ไม่สามารถย่อลิงก์ได้ (${providers[provider].name}): อาจติดปัญหา CORS หรือลิงก์ผิด`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(shortUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="max-w-xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">ย่อลิงก์</h2>
-        <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-mono">v1.5.2</span>
-      </div>
-
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <form onSubmit={handleShorten} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">เลือกผู้ให้บริการ</label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="w-full p-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
-            >
-              {Object.entries(providers).map(([key, data]) => (
-                <option key={key} value={key}>{data.name} {data.requireKey ? '(API Key)' : '(Free)'}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1 ml-1">
-              <span className="font-semibold">ข้อจำกัด:</span> {providers[provider].limit}
-            </p>
-          </div>
-
-
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">URL ปลายทาง</label>
-            <div className="relative">
-              <input
-                type="url"
-                required
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com/very-long..."
-                className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
-              />
-              <div className="absolute right-3 top-3 text-gray-400"><Link size={20} /></div>
-            </div>
-          </div>
-          <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2">
-            {loading ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span> : <><Scissors size={20} /><span>สร้างลิงก์ย่อ</span></>}
-          </button>
-        </form>
-
-        {error && <p className="text-red-500 text-sm text-center mt-2">{error}</p>}
-
-        {shortUrl && (
-          <div className="mt-6 p-4 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center justify-between animate-fade-in">
-            <a href={shortUrl} target="_blank" rel="noreferrer" className="truncate mr-4 text-indigo-700 font-medium underline">{shortUrl}</a>
-            <button onClick={copyToClipboard} className={`p-2 rounded-lg transition-all ${copied ? 'bg-green-500 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-100'}`}>
-              {copied ? <Check size={20} /> : <Copy size={20} />}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // 2. Image Compressor (Real - Browser Canvas)
 const ImageCompressor = () => {
   const [originalImage, setOriginalImage] = useState(null);
@@ -867,8 +757,10 @@ const QRCodeGenerator = () => {
   );
 };
 
-// 5. Gemini OCR (Screen Capture + Interactive Crop + Real API + PDF Support)
-const GeminiOCR = () => {
+// 5. Gemini OCR (Screen Capture + Electron Snipping Tool + Interactive Crop + Real API + PDF Support)
+const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+
   const [apiKey, setApiKey] = useState(() => {
     let key = localStorage.getItem('gemini_api_key');
     if (key === 'AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk') {
@@ -880,6 +772,10 @@ const GeminiOCR = () => {
   const [showKeyInput, setShowKeyInput] = useState(() => !apiKey);
   const [showKeyText, setShowKeyText] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+
+  // Desktop App Global Hotkey state
+  const [hotkey, setHotkey] = useState(() => localStorage.getItem('ocr_global_hotkey') || 'CommandOrControl+Shift+X');
+  const [hotkeyStatus, setHotkeyStatus] = useState('');
 
   // Source image / PDF state
   const [image, setImage] = useState(null); // Full image DataURL
@@ -903,6 +799,7 @@ const GeminiOCR = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [autoCopiedNotice, setAutoCopiedNotice] = useState(false);
   const [history, setHistory] = useState([]); // [{ id, preview, text, time }]
 
   const fileInputRef = useRef(null);
@@ -916,6 +813,38 @@ const GeminiOCR = () => {
     summary: 'Extract the text from this image and provide: 1) The exact extracted text, and 2) A concise bullet-point summary in Thai.',
     translate_th: 'Extract all text from this image and translate it naturally into Thai. Show both the original text and the Thai translation.'
   };
+
+  // Sync saved hotkey with Electron main process on mount
+  useEffect(() => {
+    if (!isElectron) return;
+    const saved = localStorage.getItem('ocr_global_hotkey');
+    if (saved) {
+      window.electronAPI.setHotkey(saved).then((res) => {
+        if (res?.success) setHotkey(res.hotkey);
+      });
+    } else {
+      window.electronAPI.getHotkey().then((hk) => {
+        if (hk) setHotkey(hk);
+      });
+    }
+  }, [isElectron]);
+
+  const handleChangeHotkey = async (newHk) => {
+    setHotkey(newHk);
+    localStorage.setItem('ocr_global_hotkey', newHk);
+    if (isElectron) {
+      const res = await window.electronAPI.setHotkey(newHk);
+      if (res?.success) {
+        setHotkeyStatus('บันทึกคีย์ลัดแล้ว');
+        setTimeout(() => setHotkeyStatus(''), 2000);
+      } else if (res?.error) {
+        setError(res.error);
+      }
+    }
+  };
+
+  const formatHotkeyLabel = (hk) =>
+    hk.replace('CommandOrControl', 'Ctrl').replace(/\+/g, ' + ');
 
   const handleSaveApiKey = (newKey) => {
     const trimmed = newKey.trim();
@@ -938,6 +867,23 @@ const GeminiOCR = () => {
     setCroppedPixelSize(null);
     setError('');
   };
+
+  // Handle incoming snip from Electron fullscreen Snipping Overlay (Global Hotkey or button)
+  useEffect(() => {
+    if (!pendingSnip) return;
+    const { croppedDataUrl, fullDataUrl, pixelSize, normalizedRect } = pendingSnip;
+    setPdfPages([]);
+    setImage(fullDataUrl || croppedDataUrl);
+    setSourceLabel('แคปหน้าือด่วน (Snipping Tool)');
+    if (normalizedRect) setCropRect(normalizedRect);
+    if (pixelSize) setCroppedPixelSize(pixelSize);
+    setCroppedPreview(croppedDataUrl);
+    onClearPendingSnip?.();
+
+    if (croppedDataUrl) {
+      handleExtractText(croppedDataUrl, true);
+    }
+  }, [pendingSnip]);
 
   // Load File (Image or PDF)
   const processFile = async (file, labelPrefix = 'อัปโหลด') => {
@@ -991,9 +937,14 @@ const GeminiOCR = () => {
     e.target.value = '';
   };
 
-  // 1. Desktop Screen Capture (getDisplayMedia)
+  // 1. Desktop Screen Capture (Native Electron Snipping Tool OR Browser getDisplayMedia)
   const handleScreenCapture = async () => {
     setError('');
+    if (isElectron) {
+      await window.electronAPI.startSnip();
+      return;
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
       setError('เบราว์เซอร์บนอุปกรณ์นี้ไม่รองรับการแคปหน้าจอโดยตรง (บนมือถือแนะนำให้แคปหน้าจอแล้วกดปุ่ม "วางรูป" หรือ "เลือกรูป/ถ่ายภาพ")');
       return;
@@ -1011,7 +962,6 @@ const GeminiOCR = () => {
       video.muted = true;
       await video.play();
 
-      // Wait briefly to ensure video frame is ready
       await new Promise((resolve) => setTimeout(resolve, 150));
 
       const canvas = document.createElement('canvas');
@@ -1020,7 +970,6 @@ const GeminiOCR = () => {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Stop screen sharing immediately after capturing frame
       track.stop();
       stream.getTracks().forEach((t) => t.stop());
 
@@ -1123,7 +1072,6 @@ const GeminiOCR = () => {
 
   const handlePointerDown = (e) => {
     if (!image || loading) return;
-    // Only primary mouse button or touch
     if (e.button !== undefined && e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -1153,7 +1101,6 @@ const GeminiOCR = () => {
       // ignore if not captured
     }
     if (!cropRect || cropRect.w < 0.015 || cropRect.h < 0.015) {
-      // Too small click -> clear selection (use full image)
       setCropRect(null);
       setCroppedPreview(null);
       setCroppedPixelSize(null);
@@ -1161,7 +1108,7 @@ const GeminiOCR = () => {
     }
     const croppedUrl = generateCroppedImage(cropRect);
     if (autoOcrOnCrop && croppedUrl) {
-      handleExtractText(croppedUrl);
+      handleExtractText(croppedUrl, true);
     }
   };
 
@@ -1171,8 +1118,17 @@ const GeminiOCR = () => {
     setCroppedPixelSize(null);
   };
 
+  const copyStringToSystemClipboard = (str) => {
+    if (!str) return;
+    if (isElectron && window.electronAPI?.copyToClipboard) {
+      window.electronAPI.copyToClipboard(str);
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(str).catch(() => {});
+    }
+  };
+
   // Run Gemini OCR on either cropped region or full image
-  const handleExtractText = async (overrideDataUrl = null) => {
+  const handleExtractText = async (overrideDataUrl = null, autoCopyResult = false) => {
     if (!apiKey) {
       setShowKeyInput(true);
       setError('กรุณาใส่ Gemini API Key ด้านบนก่อนเริ่มดึงข้อความ');
@@ -1183,6 +1139,7 @@ const GeminiOCR = () => {
 
     setLoading(true);
     setError('');
+    setAutoCopiedNotice(false);
     if (!appendMode) setText('');
 
     try {
@@ -1215,7 +1172,14 @@ const GeminiOCR = () => {
         throw new Error('ไม่พบข้อความในบริเวณที่เลือก ลองลากคลุมพื้นที่ให้กว้างขึ้น');
       }
 
-      setText((prev) => (appendMode && prev ? `${prev}\n\n---\n${extracted}` : extracted));
+      const finalOutput = appendMode && text ? `${text}\n\n---\n${extracted}` : extracted;
+      setText(finalOutput);
+
+      if (autoCopyResult || isElectron) {
+        copyStringToSystemClipboard(finalOutput);
+        setAutoCopiedNotice(true);
+        setTimeout(() => setAutoCopiedNotice(false), 4000);
+      }
 
       // Save to session history
       setHistory((prev) => [
@@ -1237,7 +1201,7 @@ const GeminiOCR = () => {
 
   const handleCopyText = () => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    copyStringToSystemClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -1263,7 +1227,7 @@ const GeminiOCR = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
-      {/* Header & API Key Toggle */}
+      {/* Header, Hotkey Setting & API Key Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
         <div>
           <div className="flex items-center gap-2.5">
@@ -1271,30 +1235,51 @@ const GeminiOCR = () => {
               <Crop size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                แคปหน้าจอ & เลือกส่วนดึงข้อความ (AI OCR)
-                <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">
-                  PC & มือถือ
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 flex-wrap">
+                <span>แคปหน้าจอ & เลือกส่วนดึงข้อความ (AI OCR)</span>
+                <span className="text-xs bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full font-medium">
+                  {isElectron ? 'Windows Desktop App' : 'PC & มือถือ'}
                 </span>
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                แคปหน้าจอ วางรูป (Ctrl+V) หรือถ่ายภาพ แล้วลากคลุมเฉพาะกรอบข้อความที่ต้องการนำออกไปใช้
+                {isElectron
+                  ? `กดคีย์ลัด ${formatHotkeyLabel(hotkey)} จากหน้าจอไหนก็ได้เพื่อลากคลุมดึงข้อความเหมือน Snipping Tool`
+                  : 'แคปหน้าจอ วางรูป (Ctrl+V) หรือถ่ายภาพ แล้วลากคลุมเฉพาะกรอบข้อความที่ต้องการนำออกไปใช้'}
               </p>
             </div>
           </div>
         </div>
 
-        <button
-          onClick={() => setShowKeyInput(!showKeyInput)}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-all self-start sm:self-auto ${
-            apiKey
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-              : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-          }`}
-        >
-          <Key size={15} />
-          <span>{apiKey ? 'ตั้งค่า API Key แล้ว' : 'ใส่ Gemini API Key'}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {/* Global Hotkey Selector (Active in Windows Electron App & previewable on Web) */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+            <span className="text-slate-500 font-medium">คีย์ลัดแคปจอ:</span>
+            <select
+              value={hotkey}
+              onChange={(e) => handleChangeHotkey(e.target.value)}
+              className="bg-transparent font-semibold text-indigo-700 outline-none cursor-pointer"
+            >
+              <option value="CommandOrControl+Shift+X">Ctrl + Shift + X</option>
+              <option value="Alt+Shift+S">Alt + Shift + S</option>
+              <option value="CommandOrControl+Shift+A">Ctrl + Shift + A</option>
+              <option value="F8">ปุ่ม F8</option>
+              <option value="F9">ปุ่ม F9</option>
+            </select>
+            {hotkeyStatus && <span className="text-emerald-600 text-[11px] font-medium">✓</span>}
+          </div>
+
+          <button
+            onClick={() => setShowKeyInput(!showKeyInput)}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-all ${
+              apiKey
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+            }`}
+          >
+            <Key size={15} />
+            <span>{apiKey ? 'ตั้งค่า API Key แล้ว' : 'ใส่ Gemini API Key'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Collapsible API Key Bar */}
@@ -1346,7 +1331,7 @@ const GeminiOCR = () => {
 
       {/* Action Bar: 4 Capture / Input Methods */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {/* 1. Screen Capture (PC) */}
+        {/* 1. Screen Capture / Snipping Tool (PC) */}
         <button
           type="button"
           onClick={handleScreenCapture}
@@ -1354,8 +1339,12 @@ const GeminiOCR = () => {
         >
           <Monitor size={24} className="group-hover:scale-110 transition-transform" />
           <div className="text-center">
-            <div className="text-sm font-semibold">แคปหน้าจอทันที</div>
-            <div className="text-[11px] text-indigo-100">เลือกหน้าต่าง/แท็บ (บนคอม)</div>
+            <div className="text-sm font-semibold">
+              {isElectron ? 'ลากคลุมหน้าจอ (Snip)' : 'แคปหน้าจอทันที'}
+            </div>
+            <div className="text-[11px] text-indigo-100">
+              {isElectron ? `หรือกด ${formatHotkeyLabel(hotkey)}` : 'เลือกหน้าต่าง/แท็บ (บนคอม)'}
+            </div>
           </div>
         </button>
 
@@ -1511,17 +1500,25 @@ const GeminiOCR = () => {
               >
                 <Crop size={42} className="text-indigo-400 mb-3" />
                 <p className="text-white font-medium text-sm">
-                  กดปุ่ม &ldquo;แคปหน้าจอทันที&rdquo; ด้านบน หรือกด <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-xs">Ctrl+V</kbd> เพื่อวางภาพ
+                  {isElectron ? (
+                    <>
+                      กดคีย์ลัด <kbd className="px-2 py-0.5 bg-indigo-600 text-white rounded text-xs">{formatHotkeyLabel(hotkey)}</kbd> จากหน้าจอไหนก็ได้เพื่อลากคลุมดึงข้อความทันที
+                    </>
+                  ) : (
+                    <>
+                      กดปุ่ม &ldquo;แคปหน้าจอทันที&rdquo; ด้านบน หรือกด <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-xs">Ctrl+V</kbd> เพื่อวางภาพ
+                    </>
+                  )}
                 </p>
                 <p className="text-slate-400 text-xs mt-1.5 max-w-md">
-                  บนมือถือ: แคปหน้าจอแล้วกดปุ่ม &ldquo;วางรูปจากคลิปบอร์ด&rdquo; หรือเลือกรูปจากคลังภาพ แล้วใช้นิ้วลากคลุมเฉพาะข้อความที่ต้องการ
+                  หรือลากไฟล์รูปภาพ / PDF มาวางในกรอบนี้ แล้วใช้เมาส์หรือนิ้วลากคลุมเฉพาะข้อความที่ต้องการ
                 </p>
               </div>
             ) : (
               <div className="w-full flex flex-col items-center space-y-3">
                 {/* Instruction banner above image */}
                 <div className="w-full flex items-center justify-between text-xs text-slate-300 bg-slate-800/90 px-3 py-1.5 rounded-lg">
-                  <span>💡 ใช้เมาส์หรือนิ้วลากคลุมกรอบข้อความที่ต้องการ (หากไม่ลากจะอ่านทั้งภาพ)</span>
+                  <span>💡 ใช้เมาส์หรือนิ้วลากคลุมกรอบข้อความใหม่บนภาพได้ตลอดเวลา</span>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none text-indigo-300 font-medium">
                     <input
                       type="checkbox"
@@ -1562,7 +1559,6 @@ const GeminiOCR = () => {
                         boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.58)'
                       }}
                     >
-                      {/* Corner Handles */}
                       <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
                       <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
                       <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm" />
@@ -1586,7 +1582,7 @@ const GeminiOCR = () => {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold text-indigo-900">
-                      เลือกเฉพาะส่วนแล้ว ({croppedPixelSize?.w} × {croppedPixelSize?.h} px)
+                      เลือกเฉพาะส่วนแล้ว {croppedPixelSize ? `(${croppedPixelSize.w} × ${croppedPixelSize.h} px)` : ''}
                     </div>
                     <div className="text-[11px] text-indigo-600">
                       ระบบจะส่งเฉพาะกรอบที่เลือกนี้ไปดึงข้อความ ทำให้เร็วและแม่นยำขึ้น
@@ -1701,6 +1697,13 @@ const GeminiOCR = () => {
             </div>
           </div>
 
+          {autoCopiedNotice && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-xs font-medium flex items-center gap-2 animate-fade-in">
+              <Check size={16} className="shrink-0" />
+              <span>คัดลอกข้อความเข้า Clipboard อัตโนมัติแล้ว! กด Ctrl+V วางใช้งานได้เลย</span>
+            </div>
+          )}
+
           {error && (
             <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs flex items-start gap-2.5">
               <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -1764,35 +1767,6 @@ const GeminiOCR = () => {
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-};
-
-// 6. OCSC Accreditation Search (External Link)
-const OcscSearch = () => {
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6">
-      <div className="text-center space-y-6 max-w-lg">
-        <div className="bg-indigo-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto text-indigo-600 mb-6">
-          <Search size={48} />
-        </div>
-        <div className="space-y-3">
-          <h2 className="text-2xl font-bold text-gray-800">ค้นหาหลักสูตร (ก.พ.)</h2>
-          <p className="text-gray-500 leading-relaxed">
-            เนื่องจากระบบความปลอดภัยของเว็บไซต์ ก.พ. (Security Policy) <br />
-            ไม่อนุญาตให้แสดงผลผ่านแอพอื่นโดยตรง
-          </p>
-        </div>
-        <a
-          href="https://accreditation.ocsc.go.th/accreditation/search/curriculum"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-4 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 hover:scale-105 transform duration-200"
-        >
-          <ExternalLink size={20} />
-          <span>เปิดหน้าค้นหาในแท็บใหม่</span>
-        </a>
       </div>
     </div>
   );
@@ -3078,21 +3052,33 @@ const PdfWatermark = () => {
 const App = () => {
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingSnip, setPendingSnip] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.electronAPI?.onSnipCaptured) {
+      const unsubscribe = window.electronAPI.onSnipCaptured((payload) => {
+        setActiveTab('ocr');
+        setPendingSnip(payload);
+      });
+      return () => {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      };
+    }
+  }, []);
+
   const tools = [
     // PDF & Image Tools
+    { id: 'ocr', label: 'แคปจอ & ดึงข้อความ (OCR)', icon: Zap, category: 'PDF & รูปภาพ' },
     { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type, category: 'PDF & รูปภาพ' },
     { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType, category: 'PDF & รูปภาพ' },
     { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files, category: 'PDF & รูปภาพ' },
     { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors, category: 'PDF & รูปภาพ' },
     { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2, category: 'PDF & รูปภาพ' },
     { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage, category: 'PDF & รูปภาพ' },
-    { id: 'ocr', label: 'ดึงข้อความจากไฟล์', icon: Zap, category: 'PDF & รูปภาพ' },
 
     // General Tools
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet, category: 'เครื่องมือทั่วไป' },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode, category: 'เครื่องมือทั่วไป' },
-    { id: 'shorten', label: 'ย่อลิงก์', icon: Link, category: 'เครื่องมือทั่วไป' },
-    { id: 'ocsc', label: 'ระบบรับรองคุณวุฒิ ก.พ.', icon: Search, category: 'เครื่องมือทั่วไป' },
   ];
 
   return (
@@ -3130,13 +3116,11 @@ const App = () => {
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white border-b border-gray-200 p-4 flex items-center md:hidden"><button onClick={() => setSidebarOpen(true)} className="p-2"><Menu size={24} /></button><span className="ml-4 font-bold">WorkTools</span></header>
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
-          <div className={`max-w-5xl mx-auto ${activeTab === 'ocsc' ? 'h-full flex flex-col' : ''}`}>
-            {activeTab === 'shorten' && <UrlShortener />}
+          <div className="max-w-5xl mx-auto">
             {activeTab === 'compress_img' && <ImageCompressor />}
             {activeTab === 'compress_pdf' && <PdfOptimizer />}
             {activeTab === 'qrcode' && <QRCodeGenerator />}
-            {activeTab === 'ocr' && <GeminiOCR />}
-            {activeTab === 'ocsc' && <OcscSearch />}
+            {activeTab === 'ocr' && <GeminiOCR pendingSnip={pendingSnip} onClearPendingSnip={() => setPendingSnip(null)} />}
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'pdf_split' && <PdfSplitter />}
