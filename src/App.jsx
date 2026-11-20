@@ -21,7 +21,8 @@ import {
   NotebookPen, MessageSquare, Send, Trash2, Maximize2,
   PanelLeftOpen, PanelRightOpen, PanelRightClose, Type,
   Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
-  Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw
+  Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
+  Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -311,122 +312,553 @@ const PdfOptimizer = () => {
   );
 };
 
-// 4. Advanced QR Code Generator (QRCode Monkey Style)
+// 4. Advanced QR Code Generator (Pro Suite)
 const QRCodeGenerator = () => {
-  const [url, setUrl] = useState('https://example.com');
-  const [fileExt, setFileExt] = useState('png');
-  const [qrCode] = useState(new QRCodeStyling({
-    width: 300,
-    height: 300,
-    type: 'svg',
-    data: 'https://example.com',
-    image: null,
-    dotsOptions: { color: '#000000', type: 'square' },
-    backgroundOptions: { color: '#ffffff' },
-    imageOptions: { crossOrigin: 'anonymous', margin: 10 }
-  }));
-  const ref = useRef(null);
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
 
-  // Customization States
-  const [activeTab, setActiveTab] = useState('content'); // content, colors, logo, design
+  // Content Type & Fields
+  const [contentType, setContentType] = useState('url'); // url, text, wifi, vcard, contact
+  const [url, setUrl] = useState('https://example.com');
+  const [plainText, setPlainText] = useState('');
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
+  const [wifiEncryption, setWifiEncryption] = useState('WPA'); // WPA, WEP, nopass
+  const [wifiHidden, setWifiHidden] = useState(false);
+  const [showWifiPass, setShowWifiPass] = useState(false);
+
+  const [vcardName, setVcardName] = useState('');
+  const [vcardOrg, setVcardOrg] = useState('');
+  const [vcardTitle, setVcardTitle] = useState('');
+  const [vcardPhone, setVcardPhone] = useState('');
+  const [vcardEmail, setVcardEmail] = useState('');
+
+  const [contactMode, setContactMode] = useState('tel'); // tel, email
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactSubject, setContactSubject] = useState('');
+
+  // Tabs & Export
+  const [activeTab, setActiveTab] = useState('content'); // content, colors, logo, design, frame
   const [size, setSize] = useState(1024);
+  const [fileExt, setFileExt] = useState('png');
+  const [isExporting, setIsExporting] = useState(false);
+  const [copiedImg, setCopiedImg] = useState(false);
+  const [copyErr, setCopyErr] = useState('');
 
   // Design Options
-  const [shape, setShape] = useState('square'); // NEW: square, circle
-  const [dotType, setDotType] = useState('square');
-  const [cornerSquareType, setCornerSquareType] = useState('square');
-  const [cornerDotType, setCornerDotType] = useState('square');
+  const [shape, setShape] = useState('square'); // square, circle
+  const [dotType, setDotType] = useState('rounded');
+  const [cornerSquareType, setCornerSquareType] = useState('extra-rounded');
+  const [cornerDotType, setCornerDotType] = useState('dot');
+  const [qrMargin, setQrMargin] = useState(12);
+  const [errorLevel, setErrorLevel] = useState('Q'); // L, M, Q, H
 
   // Color Options
+  const [transparentBg, setTransparentBg] = useState(false);
   const [bgColor, setBgColor] = useState('#ffffff');
   const [fgType, setFgType] = useState('single'); // single, gradient
   const [fgColor, setFgColor] = useState('#111d47');
-  const [gradientColor1, setGradientColor1] = useState('#000000');
-  const [gradientColor2, setGradientColor2] = useState('#0000ff');
+  const [gradientColor1, setGradientColor1] = useState('#1e3a8a');
+  const [gradientColor2, setGradientColor2] = useState('#4f46e5');
   const [gradientType, setGradientType] = useState('linear');
-  const [rotation, setRotation] = useState(0);
+  const [rotation, setRotation] = useState(45);
+  const [customEyeColor, setCustomEyeColor] = useState(false);
+  const [eyeFrameColor, setEyeFrameColor] = useState('#4f46e5');
+  const [eyeBallColor, setEyeBallColor] = useState('#111d47');
 
   // Logo Options
   const [logo, setLogo] = useState(null);
-  const [logoSize, setLogoSize] = useState(0.4);
-  const [logoMargin, setLogoMargin] = useState(10);
+  const [selectedDefaultLogoIdx, setSelectedDefaultLogoIdx] = useState(null);
+  const [logoSize, setLogoSize] = useState(0.38);
+  const [logoMargin, setLogoMargin] = useState(8);
+  const [hideBgDots, setHideBgDots] = useState(true);
 
-  useEffect(() => {
-    if (ref.current) {
-      qrCode.append(ref.current);
+  // Frame & Caption Options
+  const [frameStyle, setFrameStyle] = useState('none'); // none, card, banner, top_banner
+  const [frameText, setFrameText] = useState('สแกนที่นี่');
+  const [frameColor, setFrameColor] = useState('#111d47');
+  const [frameTextColor, setFrameTextColor] = useState('#ffffff');
+
+  const ref = useRef(null);
+
+  // Quick Style Presets
+  const presets = [
+    {
+      id: 'classic',
+      name: 'คลาสสิก',
+      preview: ['#000000', '#ffffff'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#ffffff');
+        setFgType('single');
+        setFgColor('#000000');
+        setCustomEyeColor(false);
+        setDotType('square');
+        setCornerSquareType('square');
+        setCornerDotType('square');
+        setShape('square');
+      }
+    },
+    {
+      id: 'navy_gold',
+      name: 'กรมท่า-ทอง',
+      preview: ['#1e3a8a', '#d97706'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#ffffff');
+        setFgType('single');
+        setFgColor('#1e3a8a');
+        setCustomEyeColor(true);
+        setEyeFrameColor('#1e3a8a');
+        setEyeBallColor('#d97706');
+        setDotType('rounded');
+        setCornerSquareType('extra-rounded');
+        setCornerDotType('dot');
+        setShape('square');
+        setFrameColor('#1e3a8a');
+        setFrameTextColor('#ffffff');
+      }
+    },
+    {
+      id: 'emerald',
+      name: 'มรกต',
+      preview: ['#047857', '#0d9488'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#ffffff');
+        setFgType('gradient');
+        setGradientColor1('#047857');
+        setGradientColor2('#0d9488');
+        setGradientType('linear');
+        setRotation(135);
+        setCustomEyeColor(true);
+        setEyeFrameColor('#065f46');
+        setEyeBallColor('#0d9488');
+        setDotType('extra-rounded');
+        setCornerSquareType('extra-rounded');
+        setCornerDotType('dot');
+        setShape('square');
+        setFrameColor('#047857');
+        setFrameTextColor('#ffffff');
+      }
+    },
+    {
+      id: 'sunset',
+      name: 'ซันเซ็ต',
+      preview: ['#e11d48', '#f97316'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#ffffff');
+        setFgType('gradient');
+        setGradientColor1('#e11d48');
+        setGradientColor2('#f97316');
+        setGradientType('linear');
+        setRotation(45);
+        setCustomEyeColor(true);
+        setEyeFrameColor('#be123c');
+        setEyeBallColor('#ea580c');
+        setDotType('classy-rounded');
+        setCornerSquareType('extra-rounded');
+        setCornerDotType('dot');
+        setShape('square');
+        setFrameColor('#e11d48');
+        setFrameTextColor('#ffffff');
+      }
+    },
+    {
+      id: 'modern',
+      name: 'โมเดิร์น',
+      preview: ['#4f46e5', '#7c3aed'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#ffffff');
+        setFgType('gradient');
+        setGradientColor1('#4f46e5');
+        setGradientColor2('#7c3aed');
+        setGradientType('linear');
+        setRotation(45);
+        setCustomEyeColor(false);
+        setDotType('dots');
+        setCornerSquareType('dot');
+        setCornerDotType('dot');
+        setShape('square');
+        setFrameColor('#4f46e5');
+        setFrameTextColor('#ffffff');
+      }
+    },
+    {
+      id: 'minimal',
+      name: 'มินิมอล',
+      preview: ['#1e293b', '#f8fafc'],
+      apply: () => {
+        setTransparentBg(false);
+        setBgColor('#f8fafc');
+        setFgType('single');
+        setFgColor('#1e293b');
+        setCustomEyeColor(false);
+        setDotType('classy');
+        setCornerSquareType('extra-rounded');
+        setCornerDotType('rounded');
+        setShape('square');
+        setFrameColor('#1e293b');
+        setFrameTextColor('#ffffff');
+      }
     }
-  }, [qrCode, ref]);
+  ];
 
-  useEffect(() => {
+  // Build encoded QR data string based on contentType
+  const escapeWifi = (str) => str.replace(/([\\;,:"])/g, '\\$1');
+
+  const qrData = useMemo(() => {
+    switch (contentType) {
+      case 'url':
+        return url.trim() || 'https://example.com';
+      case 'text':
+        return plainText.trim() || 'ข้อความตัวอย่าง';
+      case 'wifi': {
+        const ssid = escapeWifi(wifiSsid.trim());
+        const pass = wifiEncryption === 'nopass' ? '' : escapeWifi(wifiPassword);
+        return `WIFI:T:${wifiEncryption};S:${ssid};P:${pass};H:${wifiHidden ? 'true' : 'false'};;`;
+      }
+      case 'vcard': {
+        const lines = [
+          'BEGIN:VCARD',
+          'VERSION:3.0',
+          `FN:${vcardName.trim() || 'ชื่อ-นามสกุล'}`,
+          vcardOrg.trim() ? `ORG:${vcardOrg.trim()}` : '',
+          vcardTitle.trim() ? `TITLE:${vcardTitle.trim()}` : '',
+          vcardPhone.trim() ? `TEL;TYPE=CELL:${vcardPhone.trim()}` : '',
+          vcardEmail.trim() ? `EMAIL:${vcardEmail.trim()}` : '',
+          'END:VCARD'
+        ].filter(Boolean);
+        return lines.join('\n');
+      }
+      case 'contact': {
+        if (contactMode === 'tel') {
+          return `tel:${contactPhone.trim().replace(/\s+/g, '')}`;
+        }
+        const subj = contactSubject.trim() ? `?subject=${encodeURIComponent(contactSubject.trim())}` : '';
+        return `mailto:${contactEmail.trim()}${subj}`;
+      }
+      default:
+        return url.trim() || 'https://example.com';
+    }
+  }, [
+    contentType, url, plainText, wifiSsid, wifiPassword, wifiEncryption, wifiHidden,
+    vcardName, vcardOrg, vcardTitle, vcardPhone, vcardEmail,
+    contactMode, contactPhone, contactEmail, contactSubject
+  ]);
+
+  // Build QRCodeStyling options object
+  const buildQrOptions = (renderSize = 260, renderType = 'svg') => {
     const dotsOptions = {
       type: dotType,
       color: fgType === 'single' ? fgColor : undefined,
-      gradient: fgType === 'gradient' ? {
-        type: gradientType,
-        rotation: rotation * (Math.PI / 180),
-        colorStops: [{ offset: 0, color: gradientColor1 }, { offset: 1, color: gradientColor2 }]
-      } : undefined
+      gradient: fgType === 'gradient'
+        ? {
+            type: gradientType,
+            rotation: rotation * (Math.PI / 180),
+            colorStops: [
+              { offset: 0, color: gradientColor1 },
+              { offset: 1, color: gradientColor2 }
+            ]
+          }
+        : undefined
     };
 
-    qrCode.update({
-      shape: shape, // NEW
-      data: url,
-      image: logo,
-      dotsOptions: dotsOptions,
-      backgroundOptions: { color: bgColor },
-      cornersSquareOptions: { type: cornerSquareType, color: fgType === 'single' ? fgColor : gradientColor1 },
-      cornersDotOptions: { type: cornerDotType, color: fgType === 'single' ? fgColor : gradientColor1 },
-      imageOptions: { imageSize: logoSize, margin: logoMargin }
-    });
-  }, [url, logo, shape, dotType, cornerSquareType, cornerDotType, bgColor, fgType, fgColor, gradientColor1, gradientColor2, gradientType, rotation, logoSize, logoMargin]);
+    const defaultEyeColor = fgType === 'single' ? fgColor : gradientColor1;
 
-  const handleLogoUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
+    return {
+      width: renderSize,
+      height: renderSize,
+      type: renderType,
+      shape,
+      margin: Math.round((qrMargin / 260) * renderSize),
+      data: qrData,
+      image: logo || undefined,
+      qrOptions: {
+        errorCorrectionLevel: errorLevel
+      },
+      dotsOptions,
+      backgroundOptions: {
+        color: transparentBg ? 'rgba(0, 0, 0, 0)' : bgColor
+      },
+      cornersSquareOptions: {
+        type: cornerSquareType,
+        color: customEyeColor ? eyeFrameColor : defaultEyeColor
+      },
+      cornersDotOptions: {
+        type: cornerDotType,
+        color: customEyeColor ? eyeBallColor : defaultEyeColor
+      },
+      imageOptions: {
+        crossOrigin: 'anonymous',
+        hideBackgroundDots: hideBgDots,
+        imageSize: logoSize,
+        margin: Math.round((logoMargin / 260) * renderSize)
+      }
+    };
+  };
+
+  const [qrCode] = useState(() => new QRCodeStyling(buildQrOptions(260, 'svg')));
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.innerHTML = '';
+      qrCode.append(ref.current);
+    }
+  }, [qrCode]);
+
+  useEffect(() => {
+    qrCode.update(buildQrOptions(260, 'svg'));
+  }, [
+    qrCode, qrData, logo, shape, dotType, cornerSquareType, cornerDotType,
+    qrMargin, errorLevel, transparentBg, bgColor, fgType, fgColor,
+    gradientColor1, gradientColor2, gradientType, rotation,
+    customEyeColor, eyeFrameColor, eyeBallColor, logoSize, logoMargin, hideBgDots
+  ]);
+
+  // Scannability / Contrast Ratio Check (WCAG luminance)
+  const contrastStatus = useMemo(() => {
+    if (transparentBg) {
+      return { level: 'info', text: 'พื้นหลังโปร่งใส — ควรวางบนพื้นสีที่ตัดกับตัว QR' };
+    }
+    const hexToLum = (hex) => {
+      const clean = (hex || '#000000').replace('#', '');
+      if (clean.length !== 6) return 0;
+      const r = parseInt(clean.slice(0, 2), 16) / 255;
+      const g = parseInt(clean.slice(2, 4), 16) / 255;
+      const b = parseInt(clean.slice(4, 6), 16) / 255;
+      const toLin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+      return 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
+    };
+    const lBg = hexToLum(bgColor);
+    const lFg = hexToLum(fgType === 'single' ? fgColor : gradientColor1);
+    const ratio = (Math.max(lBg, lFg) + 0.05) / (Math.min(lBg, lFg) + 0.05);
+
+    if (ratio >= 4.5) {
+      return { level: 'good', text: `สแกนง่ายมาก (ความคมชัด ${ratio.toFixed(1)}:1)` };
+    }
+    if (ratio >= 2.5) {
+      return { level: 'warn', text: `ความคมชัดปานกลาง (${ratio.toFixed(1)}:1) — แนะนำให้ทดสอบสแกน` };
+    }
+    return { level: 'bad', text: `สีใกล้เคียงกันเกินไป (${ratio.toFixed(1)}:1) — อาจสแกนไม่ติด!` };
+  }, [transparentBg, bgColor, fgType, fgColor, gradientColor1]);
+
+  const handleSelectDefaultLogo = async (logoPath, index) => {
+    setSelectedDefaultLogoIdx(index);
+    setErrorLevel('H'); // Auto boost error correction for logo scannability
+    try {
+      const res = await fetch(logoPath);
+      const blob = await res.blob();
       const reader = new FileReader();
-      reader.onload = (e) => setLogo(e.target.result);
-      reader.readAsDataURL(file);
+      reader.onloadend = () => setLogo(reader.result);
+      reader.readAsDataURL(blob);
+    } catch {
+      setLogo(logoPath);
     }
   };
 
-  const onDownloadClick = () => {
-    // 1. Update to high resolution
-    qrCode.update({
-      width: size,
-      height: size
-    });
-
-    // 2. Wait for render (short delay to ensuring simple race condition fix)
-    setTimeout(() => {
-      // 3. Download using selected extension
-      qrCode.download({
-        extension: fileExt,
-        name: 'my-qrcode'
-      });
-
-      // 4. Revert preview size after download triggered
-      setTimeout(() => {
-        qrCode.update({ width: 300, height: 300 });
-      }, 500);
-    }, 100);
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedDefaultLogoIdx(null);
+      setErrorLevel('H');
+      const reader = new FileReader();
+      reader.onload = (ev) => setLogo(ev.target.result);
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
   };
 
-  // Helper to render shape preview
+  // Helper: Draw rounded rectangle path on Canvas
+  const drawRoundedRect = (ctx, x, y, w, h, r) => {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  };
+
+  // Compose high-resolution PNG/JPEG Blob (including optional Frame & Caption)
+  const renderHighResCanvas = async (targetSize, format = 'png') => {
+    const tempQr = new QRCodeStyling(buildQrOptions(targetSize, 'canvas'));
+    const rawBlob = await tempQr.getRawData('png');
+    if (!rawBlob) throw new Error('ไม่สามารถสร้างภาพ QR Code ได้');
+
+    const imgUrl = URL.createObjectURL(rawBlob);
+    const qrImg = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = imgUrl;
+    });
+
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const caption = frameText.trim();
+
+      if (frameStyle === 'none') {
+        canvas.width = targetSize;
+        canvas.height = targetSize;
+        if (format === 'jpeg') {
+          ctx.fillStyle = transparentBg ? '#ffffff' : bgColor;
+          ctx.fillRect(0, 0, targetSize, targetSize);
+        }
+        ctx.drawImage(qrImg, 0, 0, targetSize, targetSize);
+        return canvas;
+      }
+
+      const pad = Math.round(targetSize * 0.065);
+      const bannerH = Math.round(targetSize * 0.16);
+      const radius = Math.round(targetSize * 0.05);
+      const borderW = Math.max(4, Math.round(targetSize * 0.012));
+      const totalW = targetSize + pad * 2;
+      const totalH = targetSize + pad * 2 + bannerH;
+
+      canvas.width = totalW;
+      canvas.height = totalH;
+
+      const cardBg = transparentBg ? '#ffffff' : bgColor;
+      const fontSize = Math.round(targetSize * 0.068);
+      ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, "THSarabunPSK", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      if (frameStyle === 'card') {
+        // Rounded card with border + caption text below QR
+        drawRoundedRect(ctx, borderW / 2, borderW / 2, totalW - borderW, totalH - borderW, radius);
+        ctx.fillStyle = cardBg;
+        ctx.fill();
+        ctx.lineWidth = borderW;
+        ctx.strokeStyle = frameColor;
+        ctx.stroke();
+
+        ctx.drawImage(qrImg, pad, pad, targetSize, targetSize);
+
+        if (caption) {
+          ctx.fillStyle = frameColor;
+          ctx.fillText(caption, totalW / 2, pad + targetSize + bannerH / 2, totalW - pad * 2);
+        }
+      } else if (frameStyle === 'banner') {
+        // Rounded card with solid colored bottom banner strip
+        ctx.save();
+        drawRoundedRect(ctx, borderW / 2, borderW / 2, totalW - borderW, totalH - borderW, radius);
+        ctx.clip();
+
+        ctx.fillStyle = cardBg;
+        ctx.fillRect(0, 0, totalW, totalH);
+        ctx.drawImage(qrImg, pad, pad, targetSize, targetSize);
+
+        ctx.fillStyle = frameColor;
+        ctx.fillRect(0, totalH - bannerH, totalW, bannerH);
+
+        if (caption) {
+          ctx.fillStyle = frameTextColor;
+          ctx.fillText(caption, totalW / 2, totalH - bannerH / 2, totalW - pad * 1.5);
+        }
+        ctx.restore();
+
+        drawRoundedRect(ctx, borderW / 2, borderW / 2, totalW - borderW, totalH - borderW, radius);
+        ctx.lineWidth = borderW;
+        ctx.strokeStyle = frameColor;
+        ctx.stroke();
+      } else if (frameStyle === 'top_banner') {
+        // Rounded card with solid colored top banner strip
+        ctx.save();
+        drawRoundedRect(ctx, borderW / 2, borderW / 2, totalW - borderW, totalH - borderW, radius);
+        ctx.clip();
+
+        ctx.fillStyle = cardBg;
+        ctx.fillRect(0, 0, totalW, totalH);
+
+        ctx.fillStyle = frameColor;
+        ctx.fillRect(0, 0, totalW, bannerH);
+
+        if (caption) {
+          ctx.fillStyle = frameTextColor;
+          ctx.fillText(caption, totalW / 2, bannerH / 2, totalW - pad * 1.5);
+        }
+
+        ctx.drawImage(qrImg, pad, bannerH + pad, targetSize, targetSize);
+        ctx.restore();
+
+        drawRoundedRect(ctx, borderW / 2, borderW / 2, totalW - borderW, totalH - borderW, radius);
+        ctx.lineWidth = borderW;
+        ctx.strokeStyle = frameColor;
+        ctx.stroke();
+      }
+
+      return canvas;
+    } finally {
+      URL.revokeObjectURL(imgUrl);
+    }
+  };
+
+  const onDownloadClick = async () => {
+    setIsExporting(true);
+    setCopyErr('');
+    try {
+      const safeName = `qr-${contentType}-${new Date().toISOString().slice(0, 10)}`;
+      if (fileExt === 'svg') {
+        const tempQr = new QRCodeStyling(buildQrOptions(size, 'svg'));
+        const svgBlob = await tempQr.getRawData('svg');
+        if (svgBlob) saveAs(svgBlob, `${safeName}.svg`);
+        return;
+      }
+
+      const canvas = await renderHighResCanvas(size, fileExt);
+      const mime = fileExt === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, mime, 0.96));
+      if (blob) saveAs(blob, `${safeName}.${fileExt}`);
+    } catch (err) {
+      setCopyErr('ดาวน์โหลดไม่สำเร็จ: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const onCopyImageClick = async () => {
+    setIsExporting(true);
+    setCopyErr('');
+    try {
+      const canvas = await renderHighResCanvas(Math.min(size, 1024), 'png');
+      if (isElectron && window.electronAPI?.copyImageToClipboard) {
+        const dataUrl = canvas.toDataURL('image/png');
+        await window.electronAPI.copyImageToClipboard(dataUrl);
+      } else if (navigator.clipboard && window.ClipboardItem) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+        await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+      } else {
+        throw new Error('เบราว์เซอร์ไม่รองรับการคัดลอกรูปภาพ กรุณากดดาวน์โหลดแทน');
+      }
+      setCopiedImg(true);
+      setTimeout(() => setCopiedImg(false), 2500);
+    } catch (err) {
+      setCopyErr(err.message || 'ไม่สามารถคัดลอกรูปได้');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Helper to render shape preview icons
   const renderShapePreview = (type, isFrame = false) => {
-    const commonClass = "bg-gray-800";
+    const commonClass = 'bg-gray-800';
     if (isFrame) {
       switch (type) {
         case 'square': return <div className="w-5 h-5 border-2 border-gray-800"></div>;
-        case 'dots': return <div className="w-5 h-5 border-2 border-gray-800 rounded-full"></div>; // 'dots' as frame is usually circle
-        case 'rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-md"></div>;
+        case 'dot': return <div className="w-5 h-5 border-2 border-gray-800 rounded-full"></div>;
         case 'extra-rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-lg"></div>;
-        case 'classy': return <div className="w-5 h-5 border-2 border-gray-800 rounded-tr-lg rounded-bl-lg"></div>;
-        case 'classy-rounded': return <div className="w-5 h-5 border-2 border-gray-800 rounded-tr-lg rounded-bl-lg rounded-tl-sm rounded-br-sm"></div>;
         default: return <div className="w-5 h-5 border-2 border-gray-800"></div>;
       }
     } else {
       switch (type) {
         case 'square': return <div className={`w-4 h-4 ${commonClass}`}></div>;
+        case 'dot':
         case 'dots': return <div className={`w-4 h-4 ${commonClass} rounded-full`}></div>;
         case 'rounded': return <div className={`w-4 h-4 ${commonClass} rounded-md`}></div>;
         case 'extra-rounded': return <div className={`w-4 h-4 ${commonClass} rounded-lg`}></div>;
@@ -437,242 +869,609 @@ const QRCodeGenerator = () => {
     }
   };
 
+  const contentTypes = [
+    { id: 'url', label: 'ลิงก์ URL', icon: Link },
+    { id: 'text', label: 'ข้อความ', icon: FileText },
+    { id: 'wifi', label: 'Wi-Fi', icon: Wifi },
+    { id: 'vcard', label: 'นามบัตร', icon: User },
+    { id: 'contact', label: 'โทร/อีเมล', icon: Phone }
+  ];
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
-      <div className="text-center space-y-2">
-        <h2 className="text-3xl font-bold text-gray-800">สร้าง QR Code</h2>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <QrCode size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">สร้าง QR Code</h2>
+            <p className="text-xs text-gray-500">
+              รองรับลิงก์, Wi-Fi, นามบัตร พร้อมใส่โลโก้ กรอบข้อความ และคัดลอกไปวางใช้งานได้ทันที
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            presets[1].apply();
+            setFrameStyle('none');
+            setQrMargin(12);
+            setErrorLevel(logo ? 'H' : 'Q');
+          }}
+          className="self-start sm:self-auto px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-xl border border-gray-200 flex items-center gap-1.5 transition-all"
+        >
+          <RotateCcw size={14} />
+          <span>รีเซ็ตดีไซน์</span>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Control Panel */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            {/* Tabs */}
-            <div className="flex border-b border-gray-100 overflow-x-auto">
-              <button onClick={() => setActiveTab('content')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'content' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>1. เนื้อหา</button>
-              <button onClick={() => setActiveTab('colors')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'colors' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>2. สี</button>
-              <button onClick={() => setActiveTab('logo')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'logo' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>3. โลโก้</button>
-              <button onClick={() => setActiveTab('design')} className={`flex-1 py-4 px-4 font-medium whitespace-nowrap transition-colors ${activeTab === 'design' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50' : 'text-gray-600 hover:bg-gray-50'}`}>4. ดีไซน์</button>
-            </div>
+      {/* Quick Style Presets Strip */}
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-2 mb-3">
+          <Sparkles size={15} className="text-indigo-600" />
+          <span className="text-xs font-semibold text-gray-700">ธีมดีไซน์สำเร็จรูป (คลิกเพื่อเปลี่ยนทันที)</span>
+        </div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {presets.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={p.apply}
+              className="flex items-center gap-2 p-2 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40 transition-all text-left"
+            >
+              <span
+                className="w-5 h-5 rounded-full shrink-0 border border-gray-200 shadow-inner"
+                style={{ background: `linear-gradient(135deg, ${p.preview[0]} 50%, ${p.preview[1]} 50%)` }}
+              />
+              <span className="text-xs font-medium text-gray-700 truncate">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-            <div className="p-6 min-h-[400px]">
-              {/* Tab 1: Content */}
-              {activeTab === 'content' && (
-                <div className="space-y-4 animate-fade-in">
-                  <label className="block text-sm font-medium text-gray-700">URL เว็บไซต์</label>
-                  <div className="relative">
-                    <input
-                      type="url"
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      placeholder="https://www.example.com"
-                      className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
-                    />
-                    <div className="absolute right-3 top-3 text-gray-400"><Link size={20} /></div>
-                  </div>
-                  <p className="text-xs text-gray-500">กรอกลิงก์ที่คุณต้องการให้สแกนแล้วเปิด</p>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Control Panel (7 cols) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          {/* Control Tabs */}
+          <div className="flex border-b border-gray-100 overflow-x-auto">
+            {[
+              { id: 'content', label: '1. เนื้อหา' },
+              { id: 'colors', label: '2. สี' },
+              { id: 'logo', label: '3. โลโก้' },
+              { id: 'design', label: '4. ดีไซน์' },
+              { id: 'frame', label: '5. กรอบ & ข้อความ' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 py-3.5 px-3 text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/70'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-5 min-h-[410px]">
+            {/* Tab 1: Content */}
+            {activeTab === 'content' && (
+              <div className="space-y-5 animate-fade-in">
+                {/* Content Type Selector */}
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  {contentTypes.map((ct) => (
+                    <button
+                      key={ct.id}
+                      type="button"
+                      onClick={() => setContentType(ct.id)}
+                      className={`flex flex-col items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all ${
+                        contentType === ct.id
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm'
+                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <ct.icon size={17} />
+                      <span>{ct.label}</span>
+                    </button>
+                  ))}
                 </div>
-              )}
 
-              {/* Tab 2: Colors */}
-              {activeTab === 'colors' && (
-                <div className="space-y-6 animate-fade-in">
+                {/* Form: URL */}
+                {contentType === 'url' && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">ลิงก์เว็บไซต์ (URL)</label>
+                    <div className="relative">
+                      <input
+                        type="url"
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder="https://www.example.com"
+                        className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all text-sm"
+                      />
+                      <div className="absolute right-3 top-3 text-gray-400"><Link size={18} /></div>
+                    </div>
+                    <p className="text-xs text-gray-500">วางลิงก์เว็บ, Google Form, Google Drive หรือลิงก์ LINE OA ได้ทันที</p>
+                  </div>
+                )}
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-gray-700">สีพื้นหลัง (Background)</label>
-                    <div className="flex items-center gap-3">
-                      <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-10 w-16 p-1 rounded border cursor-pointer" />
+                {/* Form: Text */}
+                {contentType === 'text' && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">ข้อความทั่วไป (รองรับภาษาไทย)</label>
+                    <textarea
+                      rows={5}
+                      value={plainText}
+                      onChange={(e) => setPlainText(e.target.value)}
+                      placeholder="พิมพ์ข้อความที่ต้องการแสดงเมื่อสแกน QR Code..."
+                      className="w-full p-3.5 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none text-sm resize-y"
+                    />
+                  </div>
+                )}
+
+                {/* Form: Wi-Fi */}
+                {contentType === 'wifi' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ Wi-Fi (SSID)</label>
                       <input
                         type="text"
-                        value={bgColor}
-                        onChange={(e) => setBgColor(e.target.value)}
-                        placeholder="#FFFFFF"
-                        className="flex-1 p-2 rounded border border-gray-200 outline-none uppercase font-mono text-sm"
+                        value={wifiSsid}
+                        onChange={(e) => setWifiSsid(e.target.value)}
+                        placeholder="เช่น Office_WiFi_5G"
+                        className="w-full p-3 rounded-xl border border-gray-200 focus:border-indigo-500 outline-none text-sm"
                       />
                     </div>
-                  </div>
-
-                  <hr className="border-gray-100" />
-
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-gray-700">สีของ QR Code (Foreground)</label>
-                    <div className="flex gap-4 mb-2">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="fgType" checked={fgType === 'single'} onChange={() => setFgType('single')} className="text-indigo-600 focus:ring-indigo-500" />
-                        <span className="text-sm">สีเดียว</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="fgType" checked={fgType === 'gradient'} onChange={() => setFgType('gradient')} className="text-indigo-600 focus:ring-indigo-500" />
-                        <span className="text-sm">ไล่สี (Gradient)</span>
-                      </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ความปลอดภัย</label>
+                        <select
+                          value={wifiEncryption}
+                          onChange={(e) => setWifiEncryption(e.target.value)}
+                          className="w-full p-3 rounded-xl border border-gray-200 bg-white outline-none text-sm"
+                        >
+                          <option value="WPA">WPA / WPA2 / WPA3 (ทั่วไป)</option>
+                          <option value="WEP">WEP</option>
+                          <option value="nopass">ไม่มีรหัสผ่าน (Open)</option>
+                        </select>
+                      </div>
+                      {wifiEncryption !== 'nopass' && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">รหัสผ่าน Wi-Fi</label>
+                          <div className="relative">
+                            <input
+                              type={showWifiPass ? 'text' : 'password'}
+                              value={wifiPassword}
+                              onChange={(e) => setWifiPassword(e.target.value)}
+                              placeholder="รหัสผ่าน"
+                              className="w-full pl-3 pr-10 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 outline-none text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowWifiPass(!showWifiPass)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                            >
+                              {showWifiPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
+                    <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={wifiHidden}
+                        onChange={(e) => setWifiHidden(e.target.checked)}
+                        className="rounded accent-indigo-600"
+                      />
+                      <span>เครือข่ายแบบซ่อนชื่อ (Hidden SSID)</span>
+                    </label>
+                  </div>
+                )}
 
-                    {fgType === 'single' ? (
-                      <div className="flex items-center gap-3">
-                        <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="h-10 w-16 p-1 rounded border cursor-pointer" />
+                {/* Form: vCard */}
+                {contentType === 'vcard' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ - นามสกุล</label>
+                      <input
+                        type="text"
+                        value={vcardName}
+                        onChange={(e) => setVcardName(e.target.value)}
+                        placeholder="เช่น สมชาย ใจดี"
+                        className="w-full p-2.5 rounded-xl border border-gray-200 outline-none text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">หน่วยงาน / บริษัท</label>
                         <input
                           type="text"
-                          value={fgColor}
-                          onChange={(e) => setFgColor(e.target.value)}
-                          placeholder="#000000"
-                          className="flex-1 p-2 rounded border border-gray-200 outline-none uppercase font-mono text-sm"
+                          value={vcardOrg}
+                          onChange={(e) => setVcardOrg(e.target.value)}
+                          placeholder="ชื่อหน่วยงาน"
+                          className="w-full p-2.5 rounded-xl border border-gray-200 outline-none text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ตำแหน่ง</label>
+                        <input
+                          type="text"
+                          value={vcardTitle}
+                          onChange={(e) => setVcardTitle(e.target.value)}
+                          placeholder="เช่น นักวิชาการ"
+                          className="w-full p-2.5 rounded-xl border border-gray-200 outline-none text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
+                        <input
+                          type="tel"
+                          value={vcardPhone}
+                          onChange={(e) => setVcardPhone(e.target.value)}
+                          placeholder="081-234-5678"
+                          className="w-full p-2.5 rounded-xl border border-gray-200 outline-none text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">อีเมล</label>
+                        <input
+                          type="email"
+                          value={vcardEmail}
+                          onChange={(e) => setVcardEmail(e.target.value)}
+                          placeholder="name@example.com"
+                          className="w-full p-2.5 rounded-xl border border-gray-200 outline-none text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Form: Phone / Email */}
+                {contentType === 'contact' && (
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setContactMode('tel')}
+                        className={`flex-1 py-2.5 rounded-xl border text-xs font-medium flex items-center justify-center gap-1.5 ${
+                          contactMode === 'tel' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        <Phone size={15} /> โทรออกทันที (Phone)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setContactMode('email')}
+                        className={`flex-1 py-2.5 rounded-xl border text-xs font-medium flex items-center justify-center gap-1.5 ${
+                          contactMode === 'email' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        <Mail size={15} /> ส่งอีเมล (Email)
+                      </button>
+                    </div>
+                    {contactMode === 'tel' ? (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">หมายเลขโทรศัพท์</label>
+                        <input
+                          type="tel"
+                          value={contactPhone}
+                          onChange={(e) => setContactPhone(e.target.value)}
+                          placeholder="0812345678"
+                          className="w-full p-3 rounded-xl border border-gray-200 outline-none text-sm"
                         />
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="flex gap-4">
-                          <div className="flex-1">
-                            <span className="text-xs text-gray-500 block mb-1">สีเริ่ม</span>
-                            <div className="flex items-center gap-2">
-                              <input type="color" value={gradientColor1} onChange={(e) => setGradientColor1(e.target.value)} className="h-10 w-12 p-1 rounded border cursor-pointer" />
-                              <input
-                                type="text"
-                                value={gradientColor1}
-                                onChange={(e) => setGradientColor1(e.target.value)}
-                                className="w-full p-2 rounded border border-gray-200 outline-none uppercase font-mono text-xs"
-                              />
-                            </div>
-                          </div>
-                          <div className="flex-1">
-                            <span className="text-xs text-gray-500 block mb-1">สีจบ</span>
-                            <div className="flex items-center gap-2">
-                              <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="h-10 w-12 p-1 rounded border cursor-pointer" />
-                              <input
-                                type="text"
-                                value={gradientColor2}
-                                onChange={(e) => setGradientColor2(e.target.value)}
-                                className="w-full p-2 rounded border border-gray-200 outline-none uppercase font-mono text-xs"
-                              />
-                            </div>
-                          </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">อีเมลปลายทาง</label>
+                          <input
+                            type="email"
+                            value={contactEmail}
+                            onChange={(e) => setContactEmail(e.target.value)}
+                            placeholder="contact@example.com"
+                            className="w-full p-3 rounded-xl border border-gray-200 outline-none text-sm"
+                          />
                         </div>
-                        <div className="flex gap-4">
-                          <select value={gradientType} onChange={(e) => setGradientType(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-                            <option value="linear">Linear (เส้นตรง)</option>
-                            <option value="radial">Radial (วงกลม)</option>
-                          </select>
-                          <div className="flex items-center gap-2 flex-1">
-                            <span className="text-xs text-gray-500">ทิศทาง: {rotation}°</span>
-                            <input type="range" min="0" max="360" value={rotation} onChange={(e) => setRotation(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
-                          </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">หัวข้ออีเมล (ไม่บังคับ)</label>
+                          <input
+                            type="text"
+                            value={contactSubject}
+                            onChange={(e) => setContactSubject(e.target.value)}
+                            placeholder="ติดต่อสอบถามเรื่อง..."
+                            className="w-full p-3 rounded-xl border border-gray-200 outline-none text-sm"
+                          />
                         </div>
                       </div>
                     )}
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2: Colors */}
+            {activeTab === 'colors' && (
+              <div className="space-y-5 animate-fade-in">
+                {/* Background */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-gray-700">สีพื้นหลัง (Background)</label>
+                    <label className="flex items-center gap-2 text-xs text-indigo-600 font-medium cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={transparentBg}
+                        onChange={(e) => setTransparentBg(e.target.checked)}
+                        className="rounded accent-indigo-600"
+                      />
+                      <span>พื้นหลังโปร่งใส (PNG)</span>
+                    </label>
+                  </div>
+                  {!transparentBg && (
+                    <div className="flex items-center gap-3">
+                      <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-10 w-14 p-1 rounded-lg border cursor-pointer" />
+                      <input
+                        type="text"
+                        value={bgColor}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        className="flex-1 p-2.5 rounded-xl border border-gray-200 outline-none uppercase font-mono text-sm"
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
 
-              {/* Tab 3: Logo */}
-              {activeTab === 'logo' && (
-                <div className="space-y-6 animate-fade-in">
-                  <div className="space-y-4">
-                    <label className="text-sm font-medium text-gray-700 block">เลือกโลโก้มาตรฐาน</label>
-                    <div className="flex gap-3">
-                      {['./default-logo-1.png', './default-logo-2.png'].map((l, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const res = await fetch(l);
-                              const blob = await res.blob();
-                              const reader = new FileReader();
-                              reader.onloadend = () => setLogo(reader.result);
-                              reader.readAsDataURL(blob);
-                            } catch {
-                              setLogo(l);
-                            }
-                          }}
-                          className="w-16 h-16 border border-gray-200 rounded-lg p-2 hover:border-indigo-500 hover:bg-indigo-50 transition-all bg-white"
-                        >
-                          <img src={l} className="w-full h-full object-contain" alt={`Default Logo ${i + 1}`} />
-                        </button>
-                      ))}
-                    </div>
+                <hr className="border-gray-100" />
+
+                {/* Foreground */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-gray-700">สีของตัว QR Code</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input type="radio" name="fgType" checked={fgType === 'single'} onChange={() => setFgType('single')} className="accent-indigo-600" />
+                      <span>สีเดียว</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input type="radio" name="fgType" checked={fgType === 'gradient'} onChange={() => setFgType('gradient')} className="accent-indigo-600" />
+                      <span>ไล่สี (Gradient)</span>
+                    </label>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">หรือ อัปโหลดโลโก้</label>
-                    <div className="relative overflow-hidden bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl w-full p-6 text-center hover:bg-gray-100 transition-all cursor-pointer">
-                      <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Upload size={32} className="text-gray-400" />
-                        <span className="text-gray-600">{logo ? 'เปลี่ยนรูปโลโก้' : 'คลิกเพื่อเลือกไฟล์รูปภาพ'}</span>
+                  {fgType === 'single' ? (
+                    <div className="flex items-center gap-3">
+                      <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="h-10 w-14 p-1 rounded-lg border cursor-pointer" />
+                      <input
+                        type="text"
+                        value={fgColor}
+                        onChange={(e) => setFgColor(e.target.value)}
+                        className="flex-1 p-2.5 rounded-xl border border-gray-200 outline-none uppercase font-mono text-sm"
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">สีเริ่ม</span>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={gradientColor1} onChange={(e) => setGradientColor1(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                            <input type="text" value={gradientColor1} onChange={(e) => setGradientColor1(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">สีจบ</span>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                            <input type="text" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-
-                  {logo && (
-                    <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-xl">
-                      <img src={logo} className="w-16 h-16 object-contain bg-white rounded shadow-sm" />
-                      <div className="flex-1 space-y-4">
-                        <button onClick={() => setLogo(null)} className="text-red-500 text-sm hover:underline">ลบโลโก้</button>
-
-                        {/* Logo Size and Margin */}
-                        <div>
-                          <label className="text-xs font-medium text-gray-700 block mb-1">ขนาดโลโก้</label>
-                          <input
-                            type="range"
-                            min="0.1"
-                            max="1.0"
-                            step="0.05"
-                            value={logoSize}
-                            onChange={(e) => setLogoSize(Number(e.target.value))}
-                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                          />
+                      <div className="flex items-center gap-3">
+                        <select value={gradientType} onChange={(e) => setGradientType(e.target.value)} className="border rounded-lg px-3 py-2 text-xs">
+                          <option value="linear">Linear (เส้นตรง)</option>
+                          <option value="radial">Radial (วงกลม)</option>
+                        </select>
+                        <div className="flex items-center gap-2 flex-1">
+                          <span className="text-xs text-gray-500 whitespace-nowrap">มุม: {rotation}°</span>
+                          <input type="range" min="0" max="360" value={rotation} onChange={(e) => setRotation(Number(e.target.value))} className="w-full accent-indigo-600" />
                         </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-700 block mb-1">ระยะห่างรอบโลโก้</label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="50"
-                            step="1"
-                            value={logoMargin}
-                            onChange={(e) => setLogoMargin(Number(e.target.value))}
-                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                          />
-                        </div>
-
                       </div>
                     </div>
                   )}
-                  {!logo && <p className="text-center text-sm text-gray-400">ยังไม่ได้เลือกรูปภาพ</p>}
                 </div>
-              )}
 
-              {/* Tab 4: Design */}
-              {activeTab === 'design' && (
-                <div className="space-y-6 animate-fade-in content-center">
+                <hr className="border-gray-100" />
 
-                  {/* Overall Shape */}
+                {/* Custom Eye Colors */}
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={customEyeColor}
+                      onChange={(e) => setCustomEyeColor(e.target.checked)}
+                      className="rounded accent-indigo-600"
+                    />
+                    <span>แยกสีกรอบตา / ลูกตา (Custom Eye Color)</span>
+                  </label>
+                  {customEyeColor && (
+                    <div className="grid grid-cols-2 gap-3 animate-fade-in">
+                      <div>
+                        <span className="text-xs text-gray-500 block mb-1">สีกรอบตา</span>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={eyeFrameColor} onChange={(e) => setEyeFrameColor(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                          <input type="text" value={eyeFrameColor} onChange={(e) => setEyeFrameColor(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-500 block mb-1">สีลูกตา</span>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={eyeBallColor} onChange={(e) => setEyeBallColor(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                          <input type="text" value={eyeBallColor} onChange={(e) => setEyeBallColor(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tab 3: Logo */}
+            {activeTab === 'logo' && (
+              <div className="space-y-5 animate-fade-in">
+                <div className="space-y-2.5">
+                  <label className="text-sm font-medium text-gray-700 block">เลือกโลโก้มาตรฐาน</label>
+                  <div className="flex gap-3">
+                    {['./default-logo-1.png', './default-logo-2.png'].map((l, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleSelectDefaultLogo(l, i)}
+                        className={`w-16 h-16 border-2 rounded-xl p-2 transition-all bg-white ${
+                          selectedDefaultLogoIdx === i && logo
+                            ? 'border-indigo-600 ring-2 ring-indigo-100'
+                            : 'border-gray-200 hover:border-indigo-400'
+                        }`}
+                      >
+                        <img src={l} className="w-full h-full object-contain" alt={`Default Logo ${i + 1}`} />
+                      </button>
+                    ))}
+                    {logo && (
+                      <button
+                        type="button"
+                        onClick={() => { setLogo(null); setSelectedDefaultLogoIdx(null); }}
+                        className="px-3 h-16 rounded-xl border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 text-xs font-medium flex flex-col items-center justify-center gap-1"
+                      >
+                        <Trash2 size={16} />
+                        <span>เอาโลโก้ออก</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">หรือ อัปโหลดโลโก้ของคุณเอง</label>
+                  <div className="relative overflow-hidden bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl w-full p-5 text-center hover:bg-gray-100 transition-all cursor-pointer">
+                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+                    <div className="flex flex-col items-center justify-center gap-1.5">
+                      <Upload size={26} className="text-gray-400" />
+                      <span className="text-xs font-medium text-gray-600">
+                        {logo ? 'คลิกเพื่อเปลี่ยนรูปโลโก้ใหม่' : 'คลิกหรือลากไฟล์รูปภาพโลโก้ (PNG, JPG, WEBP)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {logo && (
+                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <img src={logo} alt="Selected Logo" className="w-12 h-12 object-contain bg-white rounded-lg p-1 border border-gray-200" />
+                      <div className="flex-1 text-xs">
+                        <div className="font-semibold text-gray-700">ปรับแต่งโลโก้ตรงกลาง</div>
+                        <div className="text-gray-500">ปรับระดับ Error Correction เป็น H ให้อัตโนมัติเพื่อสแกนติดง่าย</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700 block mb-1">ขนาดโลโก้: {Math.round(logoSize * 100)}%</label>
+                        <input type="range" min="0.15" max="0.55" step="0.02" value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))} className="w-full accent-indigo-600" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700 block mb-1">ระยะห่างรอบโลโก้: {logoMargin}px</label>
+                        <input type="range" min="0" max="24" step="1" value={logoMargin} onChange={(e) => setLogoMargin(Number(e.target.value))} className="w-full accent-indigo-600" />
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hideBgDots}
+                        onChange={(e) => setHideBgDots(e.target.checked)}
+                        className="rounded accent-indigo-600"
+                      />
+                      <span>ซ่อนจุด QR ด้านหลังโลโก้ (ช่วยให้โลโก้เด่นและสแกนง่ายขึ้น)</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 4: Design */}
+            {activeTab === 'design' && (
+              <div className="space-y-5 animate-fade-in">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-2">รูปทรงโดยรวม (Shape)</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {['square', 'circle'].map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setShape(type)}
+                        className={`py-2.5 px-4 rounded-xl border-2 flex items-center justify-center gap-2 text-xs font-medium transition-all ${
+                          shape === type ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 bg-current ${type === 'circle' ? 'rounded-full' : 'rounded-sm'}`} />
+                        <span>{type === 'square' ? 'สี่เหลี่ยม (Square)' : 'วงกลม (Circle)'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-2">รูปทรงจุด (Body Pattern)</label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {['square', 'dots', 'rounded', 'extra-rounded', 'classy', 'classy-rounded'].map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setDotType(type)}
+                        className={`aspect-square rounded-xl border-2 p-2 flex items-center justify-center hover:bg-gray-50 transition-all ${
+                          dotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'
+                        }`}
+                        title={type}
+                      >
+                        {renderShapePreview(type, false)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-3">รูปทรง QR Code (Shape)</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      {['square', 'circle'].map(type => (
+                    <label className="text-xs font-semibold text-gray-700 block mb-2">กรอบตา (Eye Frame)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['square', 'dot', 'extra-rounded'].map((type) => (
                         <button
                           key={type}
-                          onClick={() => setShape(type)}
-                          className={`py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-medium transition-all ${shape === type ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          type="button"
+                          onClick={() => setCornerSquareType(type)}
+                          className={`aspect-square rounded-xl border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${
+                            cornerSquareType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'
+                          }`}
+                          title={type}
                         >
-                          <div className={`w-5 h-5 bg-current ${type === 'circle' ? 'rounded-full' : 'rounded-sm'}`}></div>
-                          <span className="capitalize">{type}</span>
+                          {renderShapePreview(type, true)}
                         </button>
                       ))}
                     </div>
                   </div>
-
-                  <hr className="border-gray-100" />
-
-                  {/* Body Shape */}
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-3">รูปทรงจุด (Body Shape)</label>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                      {['square', 'dots', 'rounded', 'extra-rounded', 'classy', 'classy-rounded'].map(type => (
+                    <label className="text-xs font-semibold text-gray-700 block mb-2">ลูกตา (Eye Ball)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['square', 'dot', 'rounded'].map((type) => (
                         <button
                           key={type}
-                          onClick={() => setDotType(type)}
-                          className={`aspect-square rounded border-2 p-2 flex flex-col items-center justify-center gap-1 hover:bg-gray-50 transition-all ${dotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
+                          type="button"
+                          onClick={() => setCornerDotType(type)}
+                          className={`aspect-square rounded-xl border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${
+                            cornerDotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'
+                          }`}
                           title={type}
                         >
                           {renderShapePreview(type, false)}
@@ -680,85 +1479,248 @@ const QRCodeGenerator = () => {
                       ))}
                     </div>
                   </div>
+                </div>
 
-                  <hr className="border-gray-100" />
+                <hr className="border-gray-100" />
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {/* Eye Frame */}
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-3">กรอบตา (Eye Frame)</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {['square', 'dot', 'extra-rounded'].map(type => (
-                          <button
-                            key={type}
-                            onClick={() => setCornerSquareType(type)}
-                            className={`aspect-square rounded border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${cornerSquareType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
-                            title={type}
-                          >
-                            {renderShapePreview(type, true)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Eye Ball */}
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-3">ลูกตา (Eye Ball)</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {['square', 'dots', 'rounded', 'extra-rounded', 'classy', 'classy-rounded'].map(type => (
-                          <button
-                            key={type}
-                            onClick={() => setCornerDotType(type)}
-                            className={`aspect-square rounded border-2 p-1 flex items-center justify-center hover:bg-gray-50 transition-all ${cornerDotType === type ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200'}`}
-                            title={type}
-                          >
-                            {renderShapePreview(type, false)}
-                          </button>
-                        ))}
-                      </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1.5">
+                      ขอบขาวรอบ QR (Quiet Zone): {qrMargin}px
+                    </label>
+                    <input type="range" min="0" max="36" value={qrMargin} onChange={(e) => setQrMargin(Number(e.target.value))} className="w-full accent-indigo-600" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1.5">
+                      ความทนทานการสแกน (Error Correction)
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { id: 'L', desc: '7%' },
+                        { id: 'M', desc: '15%' },
+                        { id: 'Q', desc: '25%' },
+                        { id: 'H', desc: '30%' }
+                      ].map((lvl) => (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => setErrorLevel(lvl.id)}
+                          className={`py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                            errorLevel === lvl.id
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {lvl.id} <span className="text-[10px] opacity-75">({lvl.desc})</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
-
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Tab 5: Frame & Caption */}
+            {activeTab === 'frame' && (
+              <div className="space-y-5 animate-fade-in">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-2.5">รูปแบบกรอบและข้อความกำกับ</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {[
+                      { id: 'none', label: 'ไม่มีกรอบ' },
+                      { id: 'card', label: 'กรอบการ์ด' },
+                      { id: 'banner', label: 'แถบสีด้านล่าง' },
+                      { id: 'top_banner', label: 'แถบสีด้านบน' }
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setFrameStyle(f.id)}
+                        className={`py-3 px-2 rounded-xl border-2 text-xs font-semibold transition-all ${
+                          frameStyle === f.id
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {frameStyle !== 'none' && (
+                  <div className="space-y-4 animate-fade-in">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">ข้อความกำกับบนกรอบ</label>
+                      <input
+                        type="text"
+                        value={frameText}
+                        onChange={(e) => setFrameText(e.target.value)}
+                        placeholder="เช่น สแกนที่นี่, แบบประเมินความพึงพอใจ, Wi-Fi สำนักงาน"
+                        className="w-full p-3 rounded-xl border border-gray-200 focus:border-indigo-500 outline-none text-sm"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-xs text-gray-500 block mb-1">สีกรอบ / แถบสี</span>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={frameColor} onChange={(e) => setFrameColor(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                          <input type="text" value={frameColor} onChange={(e) => setFrameColor(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                        </div>
+                      </div>
+                      {frameStyle !== 'card' && (
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">สีตัวอักษร</span>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={frameTextColor} onChange={(e) => setFrameTextColor(e.target.value)} className="h-9 w-11 p-1 rounded-lg border cursor-pointer" />
+                            <input type="text" value={frameTextColor} onChange={(e) => setFrameTextColor(e.target.value)} className="w-full p-2 rounded-lg border border-gray-200 outline-none uppercase font-mono text-xs" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right Preview Panel */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 sticky top-6">
-            <div className="flex justify-center mb-6">
-              <div ref={ref} className="bg-white p-4 rounded-xl shadow-inner border border-gray-100" />
+        {/* Right Live Preview & Export Panel (5 cols) */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 sticky top-6 space-y-5">
+            {/* Live Preview Box (Matches exported frame & caption) */}
+            <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-50 border border-gray-100">
+              <div
+                className="overflow-hidden transition-all"
+                style={{
+                  borderRadius: frameStyle !== 'none' ? '16px' : '12px',
+                  border: frameStyle !== 'none' ? `4px solid ${frameColor}` : '1px solid #e5e7eb',
+                  backgroundColor: transparentBg && frameStyle === 'none'
+                    ? 'transparent'
+                    : (transparentBg ? '#ffffff' : bgColor),
+                  backgroundImage: transparentBg && frameStyle === 'none'
+                    ? 'repeating-conic-gradient(#e2e8f0 0% 25%, #ffffff 0% 50%)'
+                    : 'none',
+                  backgroundSize: '16px 16px'
+                }}
+              >
+                {frameStyle === 'top_banner' && (
+                  <div
+                    className="py-2.5 px-4 text-center font-bold text-sm tracking-wide"
+                    style={{ backgroundColor: frameColor, color: frameTextColor }}
+                  >
+                    {frameText || 'สแกนที่นี่'}
+                  </div>
+                )}
+
+                <div className={frameStyle !== 'none' ? 'p-3' : 'p-2'}>
+                  <div ref={ref} className="flex items-center justify-center" />
+                </div>
+
+                {frameStyle === 'card' && (
+                  <div
+                    className="pb-3 px-4 text-center font-bold text-sm"
+                    style={{ color: frameColor }}
+                  >
+                    {frameText || 'สแกนที่นี่'}
+                  </div>
+                )}
+
+                {frameStyle === 'banner' && (
+                  <div
+                    className="py-2.5 px-4 text-center font-bold text-sm tracking-wide"
+                    style={{ backgroundColor: frameColor, color: frameTextColor }}
+                  >
+                    {frameText || 'สแกนที่นี่'}
+                  </div>
+                )}
+              </div>
+
+              {/* Scannability / Contrast Badge */}
+              <div
+                className={`mt-3 px-3 py-1.5 rounded-full text-[11px] font-medium flex items-center gap-1.5 ${
+                  contrastStatus.level === 'good'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : contrastStatus.level === 'warn'
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                    : contrastStatus.level === 'bad'
+                    ? 'bg-red-50 text-red-600 border border-red-200'
+                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                <ShieldCheck size={14} />
+                <span>{contrastStatus.text}</span>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">ความละเอียด (Resolution): {size}px</label>
-                <input
-                  type="range"
-                  min="200"
-                  max="2000"
-                  step="100"
-                  value={size}
-                  onChange={(e) => setSize(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
-                <div className="flex justify-between text-xs text-gray-400">
-                  <span>200px</span>
-                  <span>1000px</span>
-                  <span>2000px</span>
-                </div>
+            {/* Resolution Slider */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs font-medium text-gray-700">
+                <span>ความละเอียดภาพ (Resolution)</span>
+                <span className="font-mono text-indigo-600">{size} × {size} px</span>
               </div>
+              <input
+                type="range"
+                min="300"
+                max="2000"
+                step="100"
+                value={size}
+                onChange={(e) => setSize(Number(e.target.value))}
+                className="w-full accent-indigo-600"
+              />
+            </div>
 
-              <div className="flex gap-2">
-                <button onClick={() => setFileExt('png')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'png' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>PNG</button>
-                <button onClick={() => setFileExt('jpeg')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'jpeg' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>JPEG</button>
-                <button onClick={() => setFileExt('svg')} className={`flex-1 py-2 text-sm rounded-lg border ${fileExt === 'svg' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}>SVG</button>
+            {/* File Format Selector */}
+            <div className="flex gap-2">
+              {['png', 'jpeg', 'svg'].map((ext) => (
+                <button
+                  key={ext}
+                  type="button"
+                  onClick={() => setFileExt(ext)}
+                  className={`flex-1 py-2 text-xs font-semibold uppercase rounded-xl border transition-all ${
+                    fileExt === ext
+                      ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {ext}
+                </button>
+              ))}
+            </div>
+
+            {fileExt === 'svg' && frameStyle !== 'none' && (
+              <p className="text-[11px] text-amber-600 text-center">
+                * ไฟล์ SVG จะส่งออกเฉพาะตัว QR (หากต้องการให้ติดกรอบและข้อความด้วย แนะนำเลือก PNG หรือ JPEG)
+              </p>
+            )}
+
+            {copyErr && (
+              <div className="p-2.5 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs text-center">
+                {copyErr}
               </div>
+            )}
 
-              <button onClick={onDownloadClick} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2">
-                <Download size={20} /> ดาวน์โหลด QR Code
+            {/* Action Buttons: Copy Image + Download */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={onCopyImageClick}
+                disabled={isExporting}
+                className="py-3 px-4 rounded-xl border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {copiedImg ? <Check size={18} className="text-emerald-600" /> : <Copy size={18} />}
+                <span>{copiedImg ? 'คัดลอกรูปแล้ว!' : 'คัดลอกรูป QR'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onDownloadClick}
+                disabled={isExporting}
+                className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Download size={18} />
+                <span>{isExporting ? 'กำลังสร้าง...' : `ดาวน์โหลด ${fileExt.toUpperCase()}`}</span>
               </button>
             </div>
           </div>

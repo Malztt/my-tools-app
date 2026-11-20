@@ -6,6 +6,7 @@ const {
   desktopCapturer,
   screen,
   clipboard,
+  nativeImage,
   shell
 } = require('electron');
 const path = require('path');
@@ -290,6 +291,15 @@ ipcMain.handle('copy-to-clipboard', (_event, text) => {
     clipboard.writeText(text);
   }
   return true;
+});
+
+ipcMain.handle('copy-image-to-clipboard', (_event, dataUrl) => {
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+    const img = nativeImage.createFromDataURL(dataUrl);
+    clipboard.writeImage(img);
+    return true;
+  }
+  return false;
 });
 
 ipcMain.handle('get-app-info', () => {

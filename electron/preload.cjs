@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHotkey: () => ipcRenderer.invoke('get-hotkey'),
   setHotkey: (hotkey) => ipcRenderer.invoke('set-hotkey', hotkey),
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
+  copyImageToClipboard: (dataUrl) => ipcRenderer.invoke('copy-image-to-clipboard', dataUrl),
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadAndInstallUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
