@@ -22,7 +22,8 @@ import {
   PanelLeftOpen, PanelRightOpen, PanelRightClose, Type,
   Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
   Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
-  Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck
+  Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
+  RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -36,97 +37,1224 @@ const formatSize = (bytes) => {
 
 // --- Components ---
 
-// 2. Image Compressor (Real - Browser Canvas)
-const ImageCompressor = () => {
+// 2. Image Studio (Crop, Aspect Ratio, Fit/Pad, Resize, Rotate/Flip, Filters, Convert & Batch ZIP)
+const ImageStudio = () => {
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+
+  const [studioMode, setStudioMode] = useState('single'); // single, batch
+
+  // --- Single Image States ---
   const [originalImage, setOriginalImage] = useState(null);
-  const [compressedImage, setCompressedImage] = useState(null);
-  const [quality, setQuality] = useState(0.7);
-  const [fileInfo, setFileInfo] = useState({ name: '', originalSize: 0, compressedSize: 0 });
+  const [workingImage, setWorkingImage] = useState(null);
+  const [natSize, setNatSize] = useState({ w: 0, h: 0 });
+  const [fileInfo, setFileInfo] = useState({ name: 'image.png', originalSize: 0 });
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setOriginalImage(event.target.result);
-        setFileInfo(prev => ({ ...prev, name: file.name, originalSize: file.size }));
-        compressImage(event.target.result, quality);
-      };
-      reader.readAsDataURL(file);
+  // Active right-panel tab
+  const [editTab, setEditTab] = useState('crop'); // crop, resize, adjust, export
+
+  // Framing & Crop States
+  const [framingMode, setFramingMode] = useState('crop'); // crop, pad
+  const [ratioId, setRatioId] = useState('free'); // free, 16:9, 16:10, 4:3, 3:2, 1:1, 9:16, 4:5, a4
+  const [padBgType, setPadBgType] = useState('blur'); // blur, white, black, custom
+  const [padBgColor, setPadBgColor] = useState('#ffffff');
+  const [cropBox, setCropBox] = useState({ x: 0, y: 0, w: 1, h: 1 }); // normalized 0..1
+  const [dragState, setDragState] = useState(null);
+
+  // Resize States
+  const [outWidth, setOutWidth] = useState(0);
+  const [outHeight, setOutHeight] = useState(0);
+  const [lockResizeRatio, setLockResizeRatio] = useState(true);
+
+  // Color Adjustments
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [saturation, setSaturation] = useState(100);
+  const [grayscale, setGrayscale] = useState(false);
+
+  // Export States
+  const [format, setFormat] = useState('image/jpeg'); // image/jpeg, image/png, image/webp
+  const [quality, setQuality] = useState(0.85);
+  const [estimatedSize, setEstimatedSize] = useState(0);
+  const [copiedImg, setCopiedImg] = useState(false);
+  const [statusErr, setStatusErr] = useState('');
+
+  // --- Batch Mode States ---
+  const [batchFiles, setBatchFiles] = useState([]);
+  const [batchRatio, setBatchRatio] = useState('keep');
+  const [batchFit, setBatchFit] = useState('crop'); // crop, pad_blur, pad_white
+  const [batchMaxWidth, setBatchMaxWidth] = useState(1920);
+  const [batchFormat, setBatchFormat] = useState('image/jpeg');
+  const [batchQuality, setBatchQuality] = useState(0.85);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+
+  const imgRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const aspectRatios = [
+    { id: 'free', label: 'อิสระ', value: null },
+    { id: '16:9', label: '16:9', value: 16 / 9 },
+    { id: '16:10', label: '16:10', value: 16 / 10 },
+    { id: '4:3', label: '4:3', value: 4 / 3 },
+    { id: '3:2', label: '3:2', value: 3 / 2 },
+    { id: '1:1', label: '1:1', value: 1 },
+    { id: '9:16', label: '9:16', value: 9 / 16 },
+    { id: '4:5', label: '4:5', value: 4 / 5 },
+    { id: 'a4', label: 'A4', value: 210 / 297 }
+  ];
+
+  const currentRatioObj = aspectRatios.find((r) => r.id === ratioId) || aspectRatios[0];
+
+  const filterCss = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) grayscale(${grayscale ? 100 : 0}%)`;
+
+  // Compute natural dimensions of the active crop or pad result
+  const computeSourceOutputDims = (w, h, box, fMode, rVal) => {
+    if (!w || !h) return { w: 0, h: 0 };
+    if (fMode === 'pad' && rVal) {
+      const imgRatio = w / h;
+      if (imgRatio > rVal) {
+        return { w: Math.round(w), h: Math.round(w / rVal) };
+      }
+      return { w: Math.round(h * rVal), h: Math.round(h) };
     }
-  };
-
-  const compressImage = (base64Str, q) => {
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-      const newBase64 = canvas.toDataURL('image/jpeg', q);
-      setCompressedImage(newBase64);
-      const sizeInBytes = Math.ceil((newBase64.length * 3) / 4);
-      setFileInfo(prev => ({ ...prev, compressedSize: sizeInBytes }));
+    return {
+      w: Math.max(1, Math.round(box.w * w)),
+      h: Math.max(1, Math.round(box.h * h))
     };
   };
 
-  const handleQualityChange = (e) => {
-    const q = parseFloat(e.target.value);
-    setQuality(q);
-    if (originalImage) compressImage(originalImage, q);
+  // Load image into single studio
+  const loadImageFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setStatusErr('');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = () => {
+        setOriginalImage(dataUrl);
+        setWorkingImage(dataUrl);
+        setNatSize({ w: img.naturalWidth, h: img.naturalHeight });
+        setFileInfo({ name: file.name || 'pasted-image.png', originalSize: file.size });
+        setFramingMode('crop');
+        setRatioId('free');
+        setCropBox({ x: 0, y: 0, w: 1, h: 1 });
+        setOutWidth(img.naturalWidth);
+        setOutHeight(img.naturalHeight);
+        setBrightness(100);
+        setContrast(100);
+        setSaturation(100);
+        setGrayscale(false);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Global Ctrl+V Paste listener for Single Studio
+  useEffect(() => {
+    if (studioMode !== 'single') return;
+    const onPaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            loadImageFile(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [studioMode]);
+
+  // Apply aspect ratio preset
+  const applyAspectRatio = (newRatioId) => {
+    setRatioId(newRatioId);
+    const rObj = aspectRatios.find((r) => r.id === newRatioId);
+    const rVal = rObj?.value || null;
+
+    if (!rVal) {
+      setFramingMode('crop');
+      const fullBox = { x: 0, y: 0, w: 1, h: 1 };
+      setCropBox(fullBox);
+      if (natSize.w && natSize.h) {
+        setOutWidth(natSize.w);
+        setOutHeight(natSize.h);
+      }
+      return;
+    }
+
+    if (framingMode === 'pad') {
+      const dims = computeSourceOutputDims(natSize.w, natSize.h, cropBox, 'pad', rVal);
+      setOutWidth(dims.w);
+      setOutHeight(dims.h);
+      return;
+    }
+
+    // Crop mode: fit largest centered box with exact aspect ratio rVal
+    if (natSize.w && natSize.h) {
+      const imgRatio = natSize.w / natSize.h;
+      let bw = 1;
+      let bh = 1;
+      if (imgRatio > rVal) {
+        bh = 1;
+        bw = rVal / imgRatio;
+      } else {
+        bw = 1;
+        bh = imgRatio / rVal;
+      }
+      const nextBox = { x: (1 - bw) / 2, y: (1 - bh) / 2, w: bw, h: bh };
+      setCropBox(nextBox);
+      setOutWidth(Math.max(1, Math.round(bw * natSize.w)));
+      setOutHeight(Math.max(1, Math.round(bh * natSize.h)));
+    }
+  };
+
+  const handleFramingModeChange = (mode) => {
+    setFramingMode(mode);
+    let targetRatioId = ratioId;
+    if (mode === 'pad' && ratioId === 'free') {
+      targetRatioId = '16:9';
+      setRatioId('16:9');
+    }
+    const rVal = aspectRatios.find((r) => r.id === targetRatioId)?.value || null;
+    if (mode === 'pad') {
+      const dims = computeSourceOutputDims(natSize.w, natSize.h, cropBox, 'pad', rVal);
+      setOutWidth(dims.w);
+      setOutHeight(dims.h);
+    } else if (rVal && natSize.w && natSize.h) {
+      const imgRatio = natSize.w / natSize.h;
+      const bw = imgRatio > rVal ? rVal / imgRatio : 1;
+      const bh = imgRatio > rVal ? 1 : imgRatio / rVal;
+      const nextBox = { x: (1 - bw) / 2, y: (1 - bh) / 2, w: bw, h: bh };
+      setCropBox(nextBox);
+      setOutWidth(Math.max(1, Math.round(bw * natSize.w)));
+      setOutHeight(Math.max(1, Math.round(bh * natSize.h)));
+    }
+  };
+
+  // Rotate or Flip workingImage cleanly
+  const applyTransform = (type) => {
+    if (!workingImage) return;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (type === 'rot_right' || type === 'rot_left') {
+        canvas.width = img.naturalHeight;
+        canvas.height = img.naturalWidth;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(type === 'rot_right' ? Math.PI / 2 : -Math.PI / 2);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      } else if (type === 'flip_h') {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, 0);
+      } else if (type === 'flip_v') {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.translate(0, canvas.height);
+        ctx.scale(1, -1);
+        ctx.drawImage(img, 0, 0);
+      }
+      const nextUrl = canvas.toDataURL('image/png');
+      setWorkingImage(nextUrl);
+      setNatSize({ w: canvas.width, h: canvas.height });
+      setCropBox({ x: 0, y: 0, w: 1, h: 1 });
+      setRatioId('free');
+      setFramingMode('crop');
+      setOutWidth(canvas.width);
+      setOutHeight(canvas.height);
+    };
+    img.src = workingImage;
+  };
+
+  // Pointer handlers for interactive crop box move & corner resize
+  const getNormPoint = (e) => {
+    const el = imgRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const b = el.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height))
+    };
+  };
+
+  const startCropDrag = (e, mode) => {
+    if (framingMode !== 'crop' || !workingImage) return;
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const pt = getNormPoint(e);
+    setDragState({ mode, startPt: pt, startBox: { ...cropBox } });
+  };
+
+  const onCropPointerMove = (e) => {
+    if (!dragState || !natSize.w || !natSize.h) return;
+    e.preventDefault();
+    const pt = getNormPoint(e);
+    const dx = pt.x - dragState.startPt.x;
+    const dy = pt.y - dragState.startPt.y;
+    const sb = dragState.startBox;
+    const minN = 0.05;
+    const targetRatio = currentRatioObj.value;
+    const imgRatio = natSize.w / natSize.h;
+
+    let next = { ...sb };
+
+    if (dragState.mode === 'move') {
+      next.x = Math.min(1 - sb.w, Math.max(0, sb.x + dx));
+      next.y = Math.min(1 - sb.h, Math.max(0, sb.y + dy));
+    } else {
+      let left = sb.x;
+      let top = sb.y;
+      let right = sb.x + sb.w;
+      let bottom = sb.y + sb.h;
+
+      if (dragState.mode.includes('l')) left = Math.min(right - minN, Math.max(0, sb.x + dx));
+      if (dragState.mode.includes('r')) right = Math.max(left + minN, Math.min(1, sb.x + sb.w + dx));
+      if (dragState.mode.includes('t')) top = Math.min(bottom - minN, Math.max(0, sb.y + dy));
+      if (dragState.mode.includes('b')) bottom = Math.max(top + minN, Math.min(1, sb.y + sb.h + dy));
+
+      let w = right - left;
+      let h = bottom - top;
+
+      if (targetRatio) {
+        // Maintain exact pixel aspect ratio: (w * natW) / (h * natH) = targetRatio => w / h = targetRatio / imgRatio
+        const normRatio = targetRatio / imgRatio;
+        h = w / normRatio;
+        if (dragState.mode.includes('t')) {
+          top = bottom - h;
+          if (top < 0) {
+            top = 0;
+            h = bottom;
+            w = h * normRatio;
+            if (dragState.mode.includes('l')) left = right - w;
+          }
+        } else {
+          if (top + h > 1) {
+            h = 1 - top;
+            w = h * normRatio;
+            if (dragState.mode.includes('l')) left = right - w;
+          }
+        }
+        if (left < 0) {
+          left = 0;
+          w = right;
+          h = w / normRatio;
+          if (dragState.mode.includes('t')) top = bottom - h;
+        }
+        if (left + w > 1) {
+          w = 1 - left;
+          h = w / normRatio;
+          if (dragState.mode.includes('t')) top = bottom - h;
+        }
+      }
+
+      next = {
+        x: Math.max(0, Math.min(1 - minN, left)),
+        y: Math.max(0, Math.min(1 - minN, top)),
+        w: Math.max(minN, Math.min(1, w)),
+        h: Math.max(minN, Math.min(1, h))
+      };
+    }
+
+    setCropBox(next);
+    setOutWidth(Math.max(1, Math.round(next.w * natSize.w)));
+    setOutHeight(Math.max(1, Math.round(next.h * natSize.h)));
+  };
+
+  const endCropDrag = (e) => {
+    if (!dragState) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    setDragState(null);
+  };
+
+  // Resize input handlers
+  const handleOutWidthChange = (val) => {
+    const num = Math.max(1, Math.min(8000, parseInt(val, 10) || 0));
+    setOutWidth(num);
+    if (lockResizeRatio && outWidth > 0 && outHeight > 0) {
+      const ratio = outWidth / outHeight;
+      setOutHeight(Math.max(1, Math.round(num / ratio)));
+    }
+  };
+
+  const handleOutHeightChange = (val) => {
+    const num = Math.max(1, Math.min(8000, parseInt(val, 10) || 0));
+    setOutHeight(num);
+    if (lockResizeRatio && outWidth > 0 && outHeight > 0) {
+      const ratio = outWidth / outHeight;
+      setOutWidth(Math.max(1, Math.round(num * ratio)));
+    }
+  };
+
+  const applyResolutionPreset = (preset) => {
+    const baseDims = computeSourceOutputDims(natSize.w, natSize.h, cropBox, framingMode, currentRatioObj.value);
+    if (!baseDims.w || !baseDims.h) return;
+    const baseRatio = baseDims.w / baseDims.h;
+
+    if (preset.type === 'scale') {
+      setOutWidth(Math.max(1, Math.round(baseDims.w * preset.val)));
+      setOutHeight(Math.max(1, Math.round(baseDims.h * preset.val)));
+    } else if (preset.type === 'width') {
+      setOutWidth(preset.val);
+      setOutHeight(Math.max(1, Math.round(preset.val / baseRatio)));
+    }
+  };
+
+  // Render final processed Canvas for Single Image
+  const renderFinalCanvas = async () => {
+    if (!workingImage || !outWidth || !outHeight) return null;
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = workingImage;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outWidth;
+    canvas.height = outHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    if (framingMode === 'pad' && currentRatioObj.value) {
+      // 1. Draw Pad Background
+      if (padBgType === 'blur') {
+        ctx.save();
+        ctx.filter = `blur(${Math.max(18, Math.round(outWidth * 0.025))}px) brightness(0.82)`;
+        const coverScale = Math.max(outWidth / img.naturalWidth, outHeight / img.naturalHeight) * 1.1;
+        const cw = img.naturalWidth * coverScale;
+        const ch = img.naturalHeight * coverScale;
+        ctx.drawImage(img, (outWidth - cw) / 2, (outHeight - ch) / 2, cw, ch);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = padBgType === 'white' ? '#ffffff' : padBgType === 'black' ? '#000000' : padBgColor;
+        ctx.fillRect(0, 0, outWidth, outHeight);
+      }
+
+      // 2. Draw crisp centered full image with filters
+      ctx.save();
+      ctx.filter = filterCss;
+      const fitScale = Math.min(outWidth / img.naturalWidth, outHeight / img.naturalHeight);
+      const dw = img.naturalWidth * fitScale;
+      const dh = img.naturalHeight * fitScale;
+      ctx.drawImage(img, (outWidth - dw) / 2, (outHeight - dh) / 2, dw, dh);
+      ctx.restore();
+    } else {
+      // Crop mode
+      if (format === 'image/jpeg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, outWidth, outHeight);
+      }
+      const sx = Math.round(cropBox.x * img.naturalWidth);
+      const sy = Math.round(cropBox.y * img.naturalHeight);
+      const sw = Math.max(1, Math.round(cropBox.w * img.naturalWidth));
+      const sh = Math.max(1, Math.round(cropBox.h * img.naturalHeight));
+
+      ctx.save();
+      ctx.filter = filterCss;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outWidth, outHeight);
+      ctx.restore();
+    }
+
+    return canvas;
+  };
+
+  // Debounced live file size estimation
+  useEffect(() => {
+    if (!workingImage || !outWidth || !outHeight) return;
+    const timer = setTimeout(async () => {
+      try {
+        const canvas = await renderFinalCanvas();
+        if (!canvas) return;
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, format, quality));
+        if (blob) setEstimatedSize(blob.size);
+      } catch {
+        // ignore estimation errors
+      }
+    }, 260);
+    return () => clearTimeout(timer);
+  }, [
+    workingImage, outWidth, outHeight, cropBox, framingMode, ratioId,
+    padBgType, padBgColor, brightness, contrast, saturation, grayscale, format, quality
+  ]);
+
+  const handleDownloadSingle = async () => {
+    setStatusErr('');
+    try {
+      const canvas = await renderFinalCanvas();
+      if (!canvas) return;
+      const ext = format === 'image/png' ? 'png' : format === 'image/webp' ? 'webp' : 'jpg';
+      const baseName = (fileInfo.name || 'image').replace(/\.[^/.]+$/, '');
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, format, quality));
+      if (blob) saveAs(blob, `${baseName}-${outWidth}x${outHeight}.${ext}`);
+    } catch (err) {
+      setStatusErr('ดาวน์โหลดไม่สำเร็จ: ' + err.message);
+    }
+  };
+
+  const handleCopySingleImage = async () => {
+    setStatusErr('');
+    try {
+      const canvas = await renderFinalCanvas();
+      if (!canvas) return;
+      if (isElectron && window.electronAPI?.copyImageToClipboard) {
+        await window.electronAPI.copyImageToClipboard(canvas.toDataURL('image/png'));
+      } else if (navigator.clipboard && window.ClipboardItem) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+        await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+      } else {
+        throw new Error('เบราว์เซอร์ไม่รองรับการคัดลอกรูปภาพ กรุณากดดาวน์โหลดแทน');
+      }
+      setCopiedImg(true);
+      setTimeout(() => setCopiedImg(false), 2500);
+    } catch (err) {
+      setStatusErr(err.message);
+    }
+  };
+
+  // --- Batch Processing ---
+  const handleBatchProcess = async () => {
+    if (batchFiles.length === 0) return;
+    setBatchProcessing(true);
+    setBatchProgress(0);
+    try {
+      const zip = new JSZip();
+      const targetR = batchRatio === 'keep' ? null : (aspectRatios.find((r) => r.id === batchRatio)?.value || null);
+      const ext = batchFormat === 'image/png' ? 'png' : batchFormat === 'image/webp' ? 'webp' : 'jpg';
+
+      for (let i = 0; i < batchFiles.length; i++) {
+        const file = batchFiles[i];
+        const imgUrl = URL.createObjectURL(file);
+        const img = await new Promise((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = imgUrl;
+        });
+
+        let w = img.naturalWidth;
+        let h = img.naturalHeight;
+        let sx = 0, sy = 0, sw = w, sh = h;
+
+        if (targetR) {
+          const imgR = w / h;
+          if (batchFit === 'crop') {
+            if (imgR > targetR) {
+              sw = Math.round(h * targetR);
+              sx = Math.round((w - sw) / 2);
+            } else {
+              sh = Math.round(w / targetR);
+              sy = Math.round((h - sh) / 2);
+            }
+            w = sw;
+            h = sh;
+          } else {
+            if (imgR > targetR) {
+              h = Math.round(w / targetR);
+            } else {
+              w = Math.round(h * targetR);
+            }
+          }
+        }
+
+        if (batchMaxWidth > 0 && w > batchMaxWidth) {
+          const scale = batchMaxWidth / w;
+          w = batchMaxWidth;
+          h = Math.max(1, Math.round(h * scale));
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        if (targetR && batchFit !== 'crop') {
+          if (batchFit === 'pad_blur') {
+            ctx.save();
+            ctx.filter = `blur(${Math.max(16, Math.round(w * 0.025))}px) brightness(0.82)`;
+            const coverScale = Math.max(w / img.naturalWidth, h / img.naturalHeight) * 1.1;
+            const cw = img.naturalWidth * coverScale;
+            const ch = img.naturalHeight * coverScale;
+            ctx.drawImage(img, (w - cw) / 2, (h - ch) / 2, cw, ch);
+            ctx.restore();
+          } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+          }
+          const fitScale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+          const dw = img.naturalWidth * fitScale;
+          const dh = img.naturalHeight * fitScale;
+          ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        } else {
+          if (batchFormat === 'image/jpeg') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+          }
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+        }
+
+        URL.revokeObjectURL(imgUrl);
+
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, batchFormat, batchQuality));
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
+        zip.file(`${baseName}-${w}x${h}.${ext}`, blob);
+        setBatchProgress(Math.round(((i + 1) / batchFiles.length) * 100));
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      saveAs(zipBlob, `images-batch-${new Date().toISOString().slice(0, 10)}.zip`);
+    } catch (err) {
+      setStatusErr('ประมวลผลชุดภาพไม่สำเร็จ: ' + err.message);
+    } finally {
+      setBatchProcessing(false);
+    }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">บีบอัดรูปภาพ</h2>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header + Mode Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <FileImage size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">จัดการรูปภาพ (Image Studio)</h2>
+            <p className="text-xs text-gray-500">
+              ครอปภาพ ปรับสัดส่วน 16:9 / 16:10 เติมขอบเบลอ ปรับความละเอียด แปลงไฟล์ และบีบอัดในที่เดียว
+            </p>
+          </div>
+        </div>
+
+        <div className="flex bg-gray-100 p-1 rounded-xl self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setStudioMode('single')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              studioMode === 'single' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Crop size={14} /> แต่ง & ครอปทีละรูป
+          </button>
+          <button
+            type="button"
+            onClick={() => setStudioMode('batch')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              studioMode === 'batch' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Layers size={14} /> ย่อ/แปลงหลายรูป (ZIP)
+          </button>
+        </div>
       </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        {!originalImage ? (
-          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
-            <input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><Upload size={32} /></div>
-            <p className="font-medium text-gray-700">คลิกเพื่อเลือกรูปภาพ</p>
+
+      {studioMode === 'single' ? (
+        !workingImage ? (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files?.[0];
+              if (f) loadImageFile(f);
+            }}
+            className="bg-white p-12 rounded-2xl shadow-sm border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-gray-50/60 transition-all cursor-pointer text-center space-y-4"
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files?.[0]) loadImageFile(e.target.files[0]);
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+            <div className="bg-indigo-50 text-indigo-600 rounded-2xl p-4 w-16 h-16 mx-auto flex items-center justify-center">
+              <Upload size={32} />
+            </div>
+            <div>
+              <p className="font-semibold text-gray-800 text-base">คลิกเพื่อเลือกรูปภาพ ลากไฟล์มาวาง หรือกด Ctrl+V เพื่อวางรูป</p>
+              <p className="text-xs text-gray-500 mt-1">รองรับ JPG, PNG, WEBP, GIF — ประมวลผลในเครื่อง 100% ไม่เสียความคมชัด</p>
+            </div>
           </div>
         ) : (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-500">ต้นฉบับ ({formatSize(fileInfo.originalSize)})</p>
-                <img src={originalImage} alt="Original" className="w-full h-48 object-cover rounded-lg border" />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Workspace Canvas (7 cols) */}
+            <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+              {/* Top Info Bar */}
+              <div className="p-3.5 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-700 truncate max-w-[180px]">{fileInfo.name}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700 font-mono text-[11px]">
+                    ต้นฉบับ {natSize.w}×{natSize.h}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-mono text-[11px]">
+                    ผลลัพธ์ {outWidth}×{outHeight}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!originalImage) return;
+                      const img = new Image();
+                      img.onload = () => {
+                        setWorkingImage(originalImage);
+                        setNatSize({ w: img.naturalWidth, h: img.naturalHeight });
+                        setCropBox({ x: 0, y: 0, w: 1, h: 1 });
+                        setRatioId('free');
+                        setFramingMode('crop');
+                        setOutWidth(img.naturalWidth);
+                        setOutHeight(img.naturalHeight);
+                        setBrightness(100);
+                        setContrast(100);
+                        setSaturation(100);
+                        setGrayscale(false);
+                      };
+                      img.src = originalImage;
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 flex items-center gap-1"
+                  >
+                    <RotateCcw size={12} /> รีเซ็ต
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOriginalImage(null);
+                      setWorkingImage(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                  >
+                    <Trash2 size={12} /> เปลี่ยนรูป
+                  </button>
+                </div>
               </div>
-              <div className="space-y-2">
-                {(() => {
-                  const isSmaller = fileInfo.compressedSize < fileInfo.originalSize;
-                  const diffPercent = Math.abs(Math.round(((fileInfo.originalSize - fileInfo.compressedSize) / fileInfo.originalSize) * 100));
-                  return (
-                    <>
-                      <p className={`text-sm font-medium ${isSmaller ? 'text-green-600' : 'text-red-600'}`}>
-                        บีบอัดแล้ว ({formatSize(fileInfo.compressedSize)})
-                        <span className={`ml-2 text-xs ${isSmaller ? 'bg-green-100' : 'bg-red-100'} px-2 py-0.5 rounded-full`}>
-                          {isSmaller ? '-' : '+'}{diffPercent}%
-                        </span>
-                      </p>
-                      {!isSmaller && <p className="text-xs text-red-500">ไฟล์ใหญ่ขึ้น! ต้นฉบับอาจถูกบีบอัดมาดีแล้ว</p>}
-                    </>
-                  );
-                })()}
-                <img src={compressedImage} alt="Compressed" className="w-full h-48 object-cover rounded-lg border" />
+
+              {/* Interactive Canvas Stage */}
+              <div className="p-4 bg-slate-900 min-h-[380px] flex flex-col items-center justify-center relative select-none">
+                {framingMode === 'pad' && currentRatioObj.value ? (
+                  /* Live Fit / Pad Preview */
+                  <div
+                    className="relative overflow-hidden rounded-lg border border-slate-700 shadow-lg flex items-center justify-center"
+                    style={{
+                      aspectRatio: `${currentRatioObj.value}`,
+                      maxHeight: '440px',
+                      maxWidth: '100%',
+                      width: currentRatioObj.value >= 1 ? '100%' : 'auto',
+                      height: currentRatioObj.value < 1 ? '420px' : 'auto',
+                      backgroundColor: padBgType === 'white' ? '#ffffff' : padBgType === 'black' ? '#000000' : padBgColor
+                    }}
+                  >
+                    {padBgType === 'blur' && (
+                      <img
+                        src={workingImage}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover scale-110 pointer-events-none"
+                        style={{ filter: 'blur(18px) brightness(0.82)' }}
+                      />
+                    )}
+                    <img
+                      src={workingImage}
+                      alt="Pad Preview"
+                      className="relative z-10 max-w-full max-h-full object-contain pointer-events-none"
+                      style={{ filter: filterCss }}
+                    />
+                  </div>
+                ) : (
+                  /* Live Interactive Crop Stage */
+                  <div
+                    onPointerMove={onCropPointerMove}
+                    onPointerUp={endCropDrag}
+                    onPointerCancel={endCropDrag}
+                    className="relative inline-block max-w-full overflow-hidden rounded-lg touch-none border border-slate-700"
+                  >
+                    <img
+                      ref={imgRef}
+                      src={workingImage}
+                      alt="Edit Canvas"
+                      draggable={false}
+                      className="block max-h-[460px] w-auto max-w-full object-contain pointer-events-none select-none"
+                      style={{ filter: filterCss }}
+                    />
+
+                    {/* Interactive Draggable & Resizable Crop Box */}
+                    <div
+                      onPointerDown={(e) => startCropDrag(e, 'move')}
+                      className="absolute border-2 border-indigo-400 cursor-move"
+                      style={{
+                        left: `${cropBox.x * 100}%`,
+                        top: `${cropBox.y * 100}%`,
+                        width: `${cropBox.w * 100}%`,
+                        height: `${cropBox.h * 100}%`,
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.58)'
+                      }}
+                    >
+                      {/* Rule of Thirds Grid Lines */}
+                      <div className="absolute inset-0 pointer-events-none opacity-35">
+                        <div className="absolute top-1/3 inset-x-0 h-px bg-white" />
+                        <div className="absolute top-2/3 inset-x-0 h-px bg-white" />
+                        <div className="absolute left-1/3 inset-y-0 w-px bg-white" />
+                        <div className="absolute left-2/3 inset-y-0 w-px bg-white" />
+                      </div>
+
+                      {/* 4 Resizable Corner Handles */}
+                      <div
+                        onPointerDown={(e) => startCropDrag(e, 'tl')}
+                        className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-sm cursor-nwse-resize"
+                      />
+                      <div
+                        onPointerDown={(e) => startCropDrag(e, 'tr')}
+                        className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-sm cursor-nesw-resize"
+                      />
+                      <div
+                        onPointerDown={(e) => startCropDrag(e, 'bl')}
+                        className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-sm cursor-nesw-resize"
+                      />
+                      <div
+                        onPointerDown={(e) => startCropDrag(e, 'br')}
+                        className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-sm cursor-nwse-resize"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-400 mt-3">
+                  {framingMode === 'pad'
+                    ? 'โหมดเติมขอบ: รักษาเนื้อหาภาพทั้งหมดไว้ครบ 100% ในสัดส่วนที่เลือก'
+                    : '💡 ลากตรงกลางกรอบเพื่อเลื่อนตำแหน่ง หรือลากมุมทั้ง 4 ด้านเพื่อปรับขนาดกรอบครอป'}
+                </p>
               </div>
             </div>
-            <div className="bg-gray-50 p-4 rounded-xl">
-              <label className="block text-sm font-medium text-gray-700 mb-2">คุณภาพ: {Math.round(quality * 100)}%</label>
-              <input type="range" min="0.1" max="1.0" step="0.1" value={quality} onChange={handleQualityChange} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setOriginalImage(null)} className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium hover:bg-gray-50">เริ่มใหม่</button>
-              <a href={compressedImage} download={`compressed-${fileInfo.name}`} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 flex justify-center items-center gap-2 shadow-lg shadow-indigo-200"><Download size={20} /> ดาวน์โหลด</a>
+
+            {/* Right Controls Panel (5 cols) */}
+            <div className="lg:col-span-5 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+              {/* Tabs */}
+              <div className="flex border-b border-gray-100 overflow-x-auto">
+                {[
+                  { id: 'crop', label: '1. ครอป/สัดส่วน' },
+                  { id: 'resize', label: '2. ความละเอียด' },
+                  { id: 'adjust', label: '3. ปรับสี' },
+                  { id: 'export', label: '4. บีบอัด/โหลด' }
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setEditTab(t.id)}
+                    className={`flex-1 py-3 px-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
+                      editTab === t.id
+                        ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/60'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="p-5 space-y-5">
+                {/* Tab 1: Crop & Ratio & Rotate/Flip */}
+                {editTab === 'crop' && (
+                  <div className="space-y-5 animate-fade-in">
+                    {/* Framing Mode: Crop vs Fit/Pad */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleFramingModeChange('crop')}
+                        className={`py-2.5 px-3 rounded-xl border-2 text-xs font-semibold transition-all ${
+                          framingMode === 'crop' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        ✂️ ตัดภาพ (Crop)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFramingModeChange('pad')}
+                        className={`py-2.5 px-3 rounded-xl border-2 text-xs font-semibold transition-all ${
+                          framingMode === 'pad' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        🖼️ เติมขอบไม่ตัดภาพ (Fit)
+                      </button>
+                    </div>
+
+                    {/* Aspect Ratio Grid */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">อัตราส่วนภาพ (Aspect Ratio)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {aspectRatios.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            disabled={framingMode === 'pad' && r.id === 'free'}
+                            onClick={() => applyAspectRatio(r.id)}
+                            className={`py-2 px-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-35 ${
+                              ratioId === r.id
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Pad Background Options */}
+                    {framingMode === 'pad' && (
+                      <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5 animate-fade-in">
+                        <label className="block text-xs font-semibold text-gray-700">พื้นหลังส่วนที่เติมขอบ</label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {[
+                            { id: 'blur', label: 'เบลอภาพ' },
+                            { id: 'white', label: 'สีขาว' },
+                            { id: 'black', label: 'สีดำ' },
+                            { id: 'custom', label: 'เลือกสี' }
+                          ].map((bg) => (
+                            <button
+                              key={bg.id}
+                              type="button"
+                              onClick={() => setPadBgType(bg.id)}
+                              className={`py-1.5 rounded-lg border text-xs font-medium ${
+                                padBgType === bg.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-gray-200 text-gray-600'
+                              }`}
+                            >
+                              {bg.label}
+                            </button>
+                          ))}
+                        </div>
+                        {padBgType === 'custom' && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <input type="color" value={padBgColor} onChange={(e) => setPadBgColor(e.target.value)} className="h-8 w-12 rounded border cursor-pointer" />
+                            <input type="text" value={padBgColor} onChange={(e) => setPadBgColor(e.target.value)} className="flex-1 p-1.5 text-xs font-mono uppercase rounded-lg border border-gray-200" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Rotate & Flip */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">หมุน & พลิกภาพ</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        <button type="button" onClick={() => applyTransform('rot_left')} className="py-2 rounded-xl border border-gray-200 hover:bg-gray-50 flex flex-col items-center gap-1 text-[11px] text-gray-700">
+                          <RotateCcw size={16} /> ซ้าย 90°
+                        </button>
+                        <button type="button" onClick={() => applyTransform('rot_right')} className="py-2 rounded-xl border border-gray-200 hover:bg-gray-50 flex flex-col items-center gap-1 text-[11px] text-gray-700">
+                          <RotateCw size={16} /> ขวา 90°
+                        </button>
+                        <button type="button" onClick={() => applyTransform('flip_h')} className="py-2 rounded-xl border border-gray-200 hover:bg-gray-50 flex flex-col items-center gap-1 text-[11px] text-gray-700">
+                          <FlipHorizontal size={16} /> พลิกซ้าย-ขวา
+                        </button>
+                        <button type="button" onClick={() => applyTransform('flip_v')} className="py-2 rounded-xl border border-gray-200 hover:bg-gray-50 flex flex-col items-center gap-1 text-[11px] text-gray-700">
+                          <FlipVertical size={16} /> พลิกบน-ล่าง
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Re-Resolution */}
+                {editTab === 'resize' && (
+                  <div className="space-y-5 animate-fade-in">
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">ความกว้าง (Width px)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="8000"
+                          value={outWidth}
+                          onChange={(e) => handleOutWidthChange(e.target.value)}
+                          className="w-full p-2.5 rounded-xl border border-gray-200 font-mono text-sm outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setLockResizeRatio(!lockResizeRatio)}
+                        title={lockResizeRatio ? 'ล็อกอัตราส่วนอยู่' : 'ปลดล็อกอัตราส่วน'}
+                        className={`p-2.5 rounded-xl border mb-0.5 transition-all ${
+                          lockResizeRatio ? 'bg-indigo-50 border-indigo-300 text-indigo-600' : 'border-gray-200 text-gray-400'
+                        }`}
+                      >
+                        {lockResizeRatio ? <Lock size={18} /> : <Unlock size={18} />}
+                      </button>
+
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">ความสูง (Height px)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="8000"
+                          value={outHeight}
+                          onChange={(e) => handleOutHeightChange(e.target.value)}
+                          className="w-full p-2.5 rounded-xl border border-gray-200 font-mono text-sm outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">ความละเอียดสำเร็จรูป (Presets)</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: '4K UHD (กว้าง 3840px)', type: 'width', val: 3840 },
+                          { label: 'Full HD (กว้าง 1920px)', type: 'width', val: 1920 },
+                          { label: 'HD (กว้าง 1280px)', type: 'width', val: 1280 },
+                          { label: 'Web / Line (กว้าง 800px)', type: 'width', val: 800 },
+                          { label: 'ขนาดต้นฉบับ (100%)', type: 'scale', val: 1 },
+                          { label: 'ย่อเหลือ 75%', type: 'scale', val: 0.75 },
+                          { label: 'ย่อเหลือ 50%', type: 'scale', val: 0.5 },
+                          { label: 'ย่อเหลือ 25%', type: 'scale', val: 0.25 }
+                        ].map((p, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => applyResolutionPreset(p)}
+                            className="py-2 px-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40 text-xs font-medium text-gray-700 text-left transition-all"
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 3: Color Adjustments */}
+                {editTab === 'adjust' && (
+                  <div className="space-y-4 animate-fade-in">
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                        <span>ความสว่าง (Brightness)</span>
+                        <span className="font-mono">{brightness}%</span>
+                      </div>
+                      <input type="range" min="50" max="150" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full accent-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                        <span>คอนทราสต์ (Contrast)</span>
+                        <span className="font-mono">{contrast}%</span>
+                      </div>
+                      <input type="range" min="50" max="150" value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full accent-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                        <span>ความสดสี (Saturation)</span>
+                        <span className="font-mono">{saturation}%</span>
+                      </div>
+                      <input type="range" min="0" max="200" value={saturation} onChange={(e) => setSaturation(Number(e.target.value))} className="w-full accent-indigo-600" />
+                    </div>
+                    <div className="flex items-center justify-between pt-2">
+                      <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={grayscale} onChange={(e) => setGrayscale(e.target.checked)} className="rounded accent-indigo-600 w-4 h-4" />
+                        <span>โหมดภาพขาว-ดำ (Grayscale)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => { setBrightness(100); setContrast(100); setSaturation(100); setGrayscale(false); }}
+                        className="text-xs text-indigo-600 hover:underline"
+                      >
+                        คืนค่าสีเดิม
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 4: Export & Compression */}
+                {editTab === 'export' && (
+                  <div className="space-y-4 animate-fade-in">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">รูปแบบไฟล์ (Format)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'image/jpeg', label: 'JPG (ไฟล์เล็ก)' },
+                          { id: 'image/png', label: 'PNG (คมชัดสูง)' },
+                          { id: 'image/webp', label: 'WEBP (เว็บไว)' }
+                        ].map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setFormat(f.id)}
+                            className={`py-2 px-2 rounded-xl border text-xs font-semibold transition-all ${
+                              format === f.id ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-gray-200 text-gray-600'
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {format !== 'image/png' && (
+                      <div>
+                        <div className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                          <span>คุณภาพ / การบีบอัด (Quality)</span>
+                          <span className="font-mono text-indigo-600">{Math.round(quality * 100)}%</span>
+                        </div>
+                        <input type="range" min="0.1" max="1.0" step="0.05" value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="w-full accent-indigo-600" />
+                      </div>
+                    )}
+
+                    {/* Size comparison card */}
+                    <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between text-xs">
+                      <div>
+                        <div className="text-gray-500">ขนาดไฟล์ต้นฉบับ</div>
+                        <div className="font-bold text-gray-800">{formatSize(fileInfo.originalSize)}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-gray-500">ขนาดไฟล์ใหม่ (ประมาณ)</div>
+                        <div className="font-bold text-indigo-600">
+                          {estimatedSize ? formatSize(estimatedSize) : '...'}
+                          {estimatedSize > 0 && fileInfo.originalSize > 0 && (
+                            <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${estimatedSize <= fileInfo.originalSize ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {estimatedSize <= fileInfo.originalSize ? '-' : '+'}
+                              {Math.abs(Math.round(((fileInfo.originalSize - estimatedSize) / fileInfo.originalSize) * 100))}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {statusErr && (
+                  <div className="p-2.5 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs text-center">
+                    {statusErr}
+                  </div>
+                )}
+
+                {/* Always-visible Action Footer */}
+                <div className="pt-3 border-t border-gray-100 grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopySingleImage}
+                    className="py-3 px-3 rounded-xl border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-semibold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5"
+                  >
+                    {copiedImg ? <Check size={17} className="text-emerald-600" /> : <Copy size={17} />}
+                    <span>{copiedImg ? 'คัดลอกแล้ว!' : 'คัดลอกรูป'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadSingle}
+                    className="py-3 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-lg shadow-indigo-100 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Download size={17} />
+                    <span>ดาวน์โหลด</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        )
+      ) : (
+        /* Batch Resize & Convert Mode */
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6 animate-fade-in">
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setBatchFiles(Array.from(e.target.files || []))}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <Layers size={36} className="text-indigo-500 mx-auto mb-3" />
+            <p className="font-semibold text-gray-800">
+              {batchFiles.length > 0 ? `เลือกแล้ว ${batchFiles.length} รูปภาพ (คลิกเพื่อเปลี่ยนชุดรูป)` : 'คลิกเพื่อเลือกรูปภาพหลายรูปพร้อมกัน'}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">ระบบจะปรับสัดส่วน ย่อความละเอียด แปลงไฟล์ และรวมเป็นไฟล์ ZIP ให้อัตโนมัติ</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">ปรับสัดส่วน</label>
+              <select value={batchRatio} onChange={(e) => setBatchRatio(e.target.value)} className="w-full p-2.5 rounded-xl border border-gray-200 text-sm bg-white">
+                <option value="keep">คงสัดส่วนเดิม</option>
+                <option value="16:9">16:9</option>
+                <option value="16:10">16:10</option>
+                <option value="4:3">4:3</option>
+                <option value="1:1">1:1 (สี่เหลี่ยมจัตุรัส)</option>
+                <option value="9:16">9:16 (แนวตั้ง)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">วิธีปรับสัดส่วน</label>
+              <select value={batchFit} onChange={(e) => setBatchFit(e.target.value)} disabled={batchRatio === 'keep'} className="w-full p-2.5 rounded-xl border border-gray-200 text-sm bg-white disabled:opacity-50">
+                <option value="crop">ครอปตรงกลาง (Center Crop)</option>
+                <option value="pad_blur">เติมขอบพื้นหลังเบลอ (Fit Blur)</option>
+                <option value="pad_white">เติมขอบสีขาว (Fit White)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">ความกว้างสูงสุด (Max Width)</label>
+              <select value={batchMaxWidth} onChange={(e) => setBatchMaxWidth(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-gray-200 text-sm bg-white">
+                <option value={0}>คงขนาดเดิม</option>
+                <option value={3840}>3840 px (4K)</option>
+                <option value={1920}>1920 px (Full HD)</option>
+                <option value={1280}>1280 px (HD)</option>
+                <option value={1080}>1080 px (Social)</option>
+                <option value={800}>800 px (Web)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">นามสกุล & คุณภาพ ({Math.round(batchQuality * 100)}%)</label>
+              <div className="flex gap-2">
+                <select value={batchFormat} onChange={(e) => setBatchFormat(e.target.value)} className="flex-1 p-2.5 rounded-xl border border-gray-200 text-sm bg-white">
+                  <option value="image/jpeg">JPG</option>
+                  <option value="image/png">PNG</option>
+                  <option value="image/webp">WEBP</option>
+                </select>
+                <input
+                  type="number"
+                  min="10"
+                  max="100"
+                  value={Math.round(batchQuality * 100)}
+                  onChange={(e) => setBatchQuality(Math.min(1, Math.max(0.1, Number(e.target.value) / 100)))}
+                  className="w-16 p-2.5 rounded-xl border border-gray-200 text-sm text-center font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {batchProcessing && (
+            <div className="space-y-1.5">
+              <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-600 transition-all duration-200" style={{ width: `${batchProgress}%` }} />
+              </div>
+              <p className="text-xs text-center text-indigo-600 font-medium">กำลังประมวลผล... {batchProgress}%</p>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleBatchProcess}
+            disabled={batchFiles.length === 0 || batchProcessing}
+            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-xl shadow-lg shadow-indigo-100 transition-all flex items-center justify-center gap-2"
+          >
+            <Download size={20} />
+            <span>{batchProcessing ? 'กำลังสร้างไฟล์ ZIP...' : `ประมวลผลทั้งหมด (${batchFiles.length} รูป) และดาวน์โหลด ZIP`}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -4095,7 +5223,7 @@ const App = () => {
     { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
     { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors },
     { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
-    { id: 'compress_img', label: 'บีบไฟล์ภาพ', icon: FileImage },
+    { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
   ];
@@ -4229,7 +5357,7 @@ const App = () => {
         </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto">
-            {activeTab === 'compress_img' && <ImageCompressor />}
+            {activeTab === 'compress_img' && <ImageStudio />}
             {activeTab === 'compress_pdf' && <PdfOptimizer />}
             {activeTab === 'qrcode' && <QRCodeGenerator />}
             {activeTab === 'ocr' && <GeminiOCR pendingSnip={pendingSnip} onClearPendingSnip={() => setPendingSnip(null)} />}
