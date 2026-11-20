@@ -44,7 +44,7 @@ jobs:
           npm run build
 
       - name: Build Rust Tauri Portable .exe
-        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       - name: Prepare Portable .exe in release/
         shell: pwsh
