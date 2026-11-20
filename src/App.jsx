@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import QRCodeStyling from 'qr-code-styling';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, degrees } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
@@ -23,7 +23,8 @@ import {
   Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
   Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
   Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
-  RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers
+  RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers,
+  Folder, FolderOpen, ArrowRight, Undo2
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -4594,14 +4595,92 @@ const PdfMerger = () => {
   );
 };
 
-// 10. PDF Splitter (Extract Pages)
+// 10. PDF Splitter (Multi-Set Grouping + Fixed Chunks + Page Picker)
 const PdfSplitter = () => {
   const [file, setFile] = useState(null);
-  const [pages, setPages] = useState([]); // { index, imgData }
+  const [pdfBuffer, setPdfBuffer] = useState(null);
+  const [totalPages, setTotalPages] = useState(0);
+  const [pages, setPages] = useState([]); // { index, pageNumber, imgData }
+  const [splitMode, setSplitMode] = useState('sets'); // sets, single_extract
+
+  // Single Extract Mode state
   const [selectedPages, setSelectedPages] = useState(new Set());
+  const [rangeInput, setRangeInput] = useState('');
+
+  // Multi-Set Grouping Mode state
+  const [sets, setSets] = useState([]);
+  const [activeSetId, setActiveSetId] = useState(null);
+  const [nextCountInput, setNextCountInput] = useState(10);
+  const [chunkSizeInput, setChunkSizeInput] = useState(10);
+
+  // Processing & Result state
+  const [isLoadingThumbnails, setIsLoadingThumbnails] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [resultPdf, setResultPdf] = useState(null);
+  const [setResults, setSetResults] = useState([]); // [{ id, name, pageCount, url }]
+
+  const setColors = [
+    { bg: 'bg-indigo-600', light: 'bg-indigo-50', border: 'border-indigo-500', text: 'text-indigo-700' },
+    { bg: 'bg-emerald-600', light: 'bg-emerald-50', border: 'border-emerald-500', text: 'text-emerald-700' },
+    { bg: 'bg-amber-500', light: 'bg-amber-50', border: 'border-amber-500', text: 'text-amber-700' },
+    { bg: 'bg-rose-600', light: 'bg-rose-50', border: 'border-rose-500', text: 'text-rose-700' },
+    { bg: 'bg-purple-600', light: 'bg-purple-50', border: 'border-purple-500', text: 'text-purple-700' },
+    { bg: 'bg-cyan-600', light: 'bg-cyan-50', border: 'border-cyan-500', text: 'text-cyan-700' }
+  ];
+
+  const parsePagesString = (str, maxP) => {
+    const out = new Set();
+    String(str || '').split(',').forEach((part) => {
+      const t = part.trim();
+      if (!t) return;
+      if (t.includes('-')) {
+        const [a, b] = t.split('-').map((n) => parseInt(n.trim(), 10));
+        if (!isNaN(a) && !isNaN(b)) {
+          const s = Math.max(1, Math.min(a, b));
+          const e = Math.min(maxP, Math.max(a, b));
+          for (let p = s; p <= e; p++) out.add(p);
+        }
+      } else {
+        const p = parseInt(t, 10);
+        if (!isNaN(p) && p >= 1 && p <= maxP) out.add(p);
+      }
+    });
+    return Array.from(out).sort((a, b) => a - b);
+  };
+
+  const formatPagesRange = (pageList) => {
+    if (!pageList || pageList.length === 0) return 'ยังไม่ได้เลือกหน้า';
+    const sorted = [...pageList].sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === prev + 1) {
+        prev = sorted[i];
+      } else {
+        ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+        start = sorted[i];
+        prev = sorted[i];
+      }
+    }
+    ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+    return ranges.join(', ');
+  };
+
+  const assignedPagesSet = useMemo(() => {
+    const s = new Set();
+    sets.forEach((st) => st.pages.forEach((p) => s.add(p)));
+    return s;
+  }, [sets]);
+
+  const remainingPages = useMemo(() => {
+    const rem = [];
+    for (let p = 1; p <= totalPages; p++) {
+      if (!assignedPagesSet.has(p)) rem.push(p);
+    }
+    return rem;
+  }, [totalPages, assignedPagesSet]);
 
   const handleFileChange = async (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -4609,35 +4688,190 @@ const PdfSplitter = () => {
     setFile(selectedFile);
     setPages([]);
     setSelectedPages(new Set());
+    setSets([]);
+    setActiveSetId(null);
     setResultPdf(null);
-    setIsProcessing(true);
-    setStatusMsg('กำลังอ่านไฟล์...');
+    setSetResults([]);
+    setIsLoadingThumbnails(true);
+    setStatusMsg('กำลังอ่านไฟล์ PDF...');
 
     try {
       const arrayBuffer = await selectedFile.arrayBuffer();
-      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      setPdfBuffer(arrayBuffer);
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer.slice(0) }).promise;
       const numPages = pdf.numPages;
-      const newPages = [];
+      setTotalPages(numPages);
 
+      const newPages = [];
       for (let i = 1; i <= numPages; i++) {
-        setStatusMsg(`กำลังโหลดหน้า ${i} จาก ${numPages}...`);
+        setStatusMsg(`กำลังโหลดตัวอย่างหน้า ${i} / ${numPages}...`);
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 0.3 }); // Thumbnail scale
+        const viewport = page.getViewport({ scale: numPages > 40 ? 0.2 : 0.28 });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
         canvas.width = viewport.width;
 
-        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        await page.render({ canvasContext: context, viewport }).promise;
         newPages.push({
-          index: i - 1, // 0-based for pdf-lib
-          pageNumber: i, // 1-based for display
-          imgData: canvas.toDataURL('image/jpeg', 0.8)
+          index: i - 1,
+          pageNumber: i,
+          imgData: canvas.toDataURL('image/jpeg', 0.72)
+        });
+        if (i % 10 === 0 || i === numPages) {
+          setPages([...newPages]);
+        }
+      }
+      setStatusMsg('');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsLoadingThumbnails(false);
+    }
+    e.target.value = '';
+  };
+
+  const addSetByNextCount = () => {
+    const count = Math.max(1, parseInt(nextCountInput, 10) || 1);
+    if (remainingPages.length === 0) return;
+    const picked = remainingPages.slice(0, count);
+    const nextNum = sets.length + 1;
+    const id = `set-${Date.now()}-${nextNum}`;
+    setSets((prev) => [...prev, { id, name: `ชุดที่ ${nextNum}`, pages: picked }]);
+    setActiveSetId(id);
+    setSetResults([]);
+  };
+
+  const addRemainingAsFinalSet = () => {
+    if (remainingPages.length === 0) return;
+    const nextNum = sets.length + 1;
+    const id = `set-${Date.now()}-${nextNum}`;
+    setSets((prev) => [...prev, { id, name: `ชุดที่ ${nextNum} (ส่วนที่เหลือ)`, pages: [...remainingPages] }]);
+    setActiveSetId(id);
+    setSetResults([]);
+  };
+
+  const addEmptyCustomSet = () => {
+    const nextNum = sets.length + 1;
+    const id = `set-${Date.now()}-${nextNum}`;
+    setSets((prev) => [...prev, { id, name: `ชุดที่ ${nextNum}`, pages: [] }]);
+    setActiveSetId(id);
+    setSetResults([]);
+  };
+
+  const autoSplitByChunkSize = () => {
+    const size = Math.max(1, parseInt(chunkSizeInput, 10) || 1);
+    if (totalPages === 0) return;
+    const generated = [];
+    let idx = 1;
+    for (let start = 1; start <= totalPages; start += size) {
+      const end = Math.min(totalPages, start + size - 1);
+      const list = [];
+      for (let p = start; p <= end; p++) list.push(p);
+      generated.push({
+        id: `set-chunk-${Date.now()}-${idx}`,
+        name: `ชุดที่ ${idx} (หน้า ${start}-${end})`,
+        pages: list
+      });
+      idx++;
+    }
+    setSets(generated);
+    setActiveSetId(generated[0]?.id || null);
+    setSetResults([]);
+  };
+
+  const updateSetName = (id, name) => {
+    setSets((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+  };
+
+  const updateSetPagesFromRange = (id, rangeStr) => {
+    const parsed = parsePagesString(rangeStr, totalPages);
+    setSets((prev) => prev.map((s) => (s.id === id ? { ...s, pages: parsed } : s)));
+    setSetResults([]);
+  };
+
+  const deleteSet = (id) => {
+    setSets((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      if (activeSetId === id) setActiveSetId(next[0]?.id || null);
+      return next;
+    });
+    setSetResults([]);
+  };
+
+  const togglePageInActiveSet = (pageNumber) => {
+    let targetId = activeSetId;
+    if (!targetId) {
+      const id = `set-${Date.now()}-1`;
+      setSets([{ id, name: 'ชุดที่ 1', pages: [pageNumber] }]);
+      setActiveSetId(id);
+      setSetResults([]);
+      return;
+    }
+
+    setSets((prev) =>
+      prev.map((s) => {
+        if (s.id !== targetId) {
+          return s.pages.includes(pageNumber)
+            ? { ...s, pages: s.pages.filter((p) => p !== pageNumber) }
+            : s;
+        }
+        const exists = s.pages.includes(pageNumber);
+        const nextPages = exists
+          ? s.pages.filter((p) => p !== pageNumber)
+          : [...s.pages, pageNumber].sort((a, b) => a - b);
+        return { ...s, pages: nextPages };
+      })
+    );
+    setSetResults([]);
+  };
+
+  const buildAllSets = async (downloadZipDirectly = false) => {
+    const validSets = sets.filter((s) => s.pages.length > 0);
+    if (!pdfBuffer || validSets.length === 0) return;
+
+    setIsProcessing(true);
+    setStatusMsg('กำลังแยกไฟล์ตามชุดที่จัดไว้...');
+    setSetResults([]);
+
+    try {
+      const srcDoc = await PDFDocument.load(pdfBuffer.slice(0));
+      const zip = new JSZip();
+      const outputs = [];
+      const baseFileName = (file?.name || 'document').replace(/\.pdf$/i, '');
+
+      for (let i = 0; i < validSets.length; i++) {
+        const st = validSets[i];
+        setStatusMsg(`กำลังสร้าง ${st.name} (${i + 1}/${validSets.length})...`);
+        const newDoc = await PDFDocument.create();
+        const indices = st.pages.map((p) => p - 1);
+        const copied = await newDoc.copyPages(srcDoc, indices);
+        copied.forEach((p) => newDoc.addPage(p));
+        const pdfBytes = await newDoc.save();
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const safeName = `${st.name.replace(/[\\/:*?"<>|]/g, '_')}.pdf`;
+
+        zip.file(safeName, pdfBytes);
+        outputs.push({
+          id: st.id,
+          name: st.name,
+          fileName: safeName,
+          pageCount: st.pages.length,
+          rangeLabel: formatPagesRange(st.pages),
+          url
         });
       }
 
-      setPages(newPages);
-      setStatusMsg('');
+      setSetResults(outputs);
+
+      if (downloadZipDirectly) {
+        setStatusMsg('กำลังบีบอัดเป็นไฟล์ ZIP...');
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        saveAs(zipBlob, `${baseFileName}-sets.zip`);
+      }
+      setStatusMsg('แยกชุดเรียบร้อยแล้ว!');
     } catch (err) {
       console.error(err);
       setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
@@ -4648,43 +4882,40 @@ const PdfSplitter = () => {
 
   const togglePage = (index) => {
     const newSelected = new Set(selectedPages);
-    if (newSelected.has(index)) {
-      newSelected.delete(index);
-    } else {
-      newSelected.add(index);
-    }
+    if (newSelected.has(index)) newSelected.delete(index);
+    else newSelected.add(index);
     setSelectedPages(newSelected);
   };
 
   const selectAll = () => {
-    if (selectedPages.size === pages.length) {
-      setSelectedPages(new Set());
-    } else {
-      setSelectedPages(new Set(pages.map(p => p.index)));
+    if (selectedPages.size === totalPages) setSelectedPages(new Set());
+    else {
+      const all = new Set();
+      for (let i = 0; i < totalPages; i++) all.add(i);
+      setSelectedPages(all);
     }
   };
 
+  const applyRangeToSingleExtract = () => {
+    const parsed = parsePagesString(rangeInput, totalPages);
+    setSelectedPages(new Set(parsed.map((p) => p - 1)));
+  };
+
   const extractPages = async () => {
-    if (selectedPages.size === 0) return;
+    if (selectedPages.size === 0 || !pdfBuffer) return;
     setIsProcessing(true);
     setStatusMsg('กำลังสร้างไฟล์ใหม่...');
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const srcDoc = await PDFDocument.load(arrayBuffer);
+      const srcDoc = await PDFDocument.load(pdfBuffer.slice(0));
       const newDoc = await PDFDocument.create();
-
-      // Sort selected pages to maintain order
       const sortedIndices = Array.from(selectedPages).sort((a, b) => a - b);
       const copiedPages = await newDoc.copyPages(srcDoc, sortedIndices);
-
-      copiedPages.forEach(page => newDoc.addPage(page));
+      copiedPages.forEach((page) => newDoc.addPage(page));
 
       const pdfBytes = await newDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-
-      setResultPdf(url);
+      setResultPdf(URL.createObjectURL(blob));
       setStatusMsg('เสร็จสิ้น!');
     } catch (err) {
       console.error(err);
@@ -4694,61 +4925,350 @@ const PdfSplitter = () => {
     }
   };
 
+  const getPageSetInfo = (pageNumber) => {
+    for (let i = 0; i < sets.length; i++) {
+      if (sets[i].pages.includes(pageNumber)) {
+        return { setIndex: i, set: sets[i], color: setColors[i % setColors.length] };
+      }
+    }
+    return null;
+  };
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">แยกไฟล์ PDF (เลือกหน้า)</h2>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header + Mode Switch */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <Scissors size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">แยกไฟล์ PDF (จัดชุด / เลือกหน้า)</h2>
+            <p className="text-xs text-gray-500">
+              แบ่งเอกสารหลายร้อยหน้าออกเป็นชุดๆ ตามจำนวนหน้าที่ต้องการ (เช่น ชุด 1 = 10 หน้า, ชุด 2 = 15 หน้า, ที่เหลือชุด 3)
+            </p>
+          </div>
+        </div>
+
+        <div className="flex bg-gray-100 p-1 rounded-xl self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setSplitMode('sets')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              splitMode === 'sets' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            📦 แยกจัดเป็นหลายชุด (ZIP)
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplitMode('single_extract')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              splitMode === 'single_extract' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            ✂️ ดึงเฉพาะหน้าที่เลือก (1 ไฟล์)
+          </button>
+        </div>
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         {!file ? (
-          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
             <input type="file" accept=".pdf" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-            <div className="bg-indigo-100 text-indigo-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><Scissors size={32} /></div>
-            <p className="font-medium text-gray-700">อัปโหลดไฟล์ PDF เพื่อแยกหน้า</p>
+            <div className="bg-indigo-50 text-indigo-600 rounded-2xl p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center">
+              <Scissors size={32} />
+            </div>
+            <p className="font-semibold text-gray-800">อัปโหลดไฟล์ PDF เพื่อแยกหน้า / จัดชุดเอกสาร</p>
+            <p className="text-xs text-gray-500 mt-1">รองรับเอกสารขนาดใหญ่ 100+ หน้า แบ่งชุดและดาวน์โหลดเป็น ZIP ได้ทันที</p>
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="bg-red-100 p-2 rounded-lg text-red-600"><FileType size={20} /></div>
                 <div>
-                  <p className="font-medium text-gray-900">{file.name}</p>
-                  <p className="text-xs text-gray-500">{pages.length} หน้า</p>
+                  <p className="font-semibold text-gray-900 text-sm">{file.name}</p>
+                  <p className="text-xs text-gray-500">
+                    ทั้งหมด <span className="font-bold text-indigo-600">{totalPages} หน้า</span>
+                    {isLoadingThumbnails && statusMsg ? ` • ${statusMsg}` : ''}
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setFile(null)} className="text-gray-400 hover:text-red-500"><X size={20} /></button>
+              <button
+                type="button"
+                onClick={() => { setFile(null); setPdfBuffer(null); setPages([]); setSets([]); setSetResults([]); setResultPdf(null); }}
+                className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg flex items-center gap-1"
+              >
+                <Trash2 size={14} /> เปลี่ยนไฟล์
+              </button>
             </div>
 
-            {isProcessing && !pages.length ? (
-              <div className="text-center py-10">
-                <span className="animate-spin inline-block rounded-full h-8 w-8 border-4 border-indigo-200 border-t-indigo-600 mb-2"></span>
-                <p className="text-gray-500">{statusMsg}</p>
-              </div>
-            ) : (
-              <>
-                <div className="flex justify-between items-center">
-                  <p className="text-sm font-medium text-gray-700">เลือกหน้าที่ต้องการแยก ({selectedPages.size})</p>
-                  <button onClick={selectAll} className="text-sm text-indigo-600 hover:underline font-medium">
-                    {selectedPages.size === pages.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
-                  </button>
+            {splitMode === 'sets' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <div className="lg:col-span-5 space-y-4">
+                  <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-indigo-900">เพิ่มชุดใหม่ตามจำนวนหน้า</span>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
+                        เหลือ {remainingPages.length} / {totalPages} หน้า
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <div className="flex-1 flex items-center bg-white border border-indigo-200 rounded-xl px-3">
+                        <span className="text-xs text-gray-500 mr-2">จำนวน</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={Math.max(1, remainingPages.length)}
+                          value={nextCountInput}
+                          onChange={(e) => setNextCountInput(e.target.value)}
+                          className="w-full py-2 text-sm font-bold text-indigo-700 outline-none bg-transparent"
+                        />
+                        <span className="text-xs text-gray-500 ml-1">หน้า</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addSetByNextCount}
+                        disabled={remainingPages.length === 0}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-semibold rounded-xl flex items-center gap-1 shadow-sm"
+                      >
+                        <Plus size={15} /> สร้างชุด
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={addRemainingAsFinalSet}
+                        disabled={remainingPages.length === 0}
+                        className="py-2 px-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-semibold rounded-xl transition-all"
+                      >
+                        + ที่เหลือทั้งหมด ({remainingPages.length} หน้า)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={addEmptyCustomSet}
+                        className="py-2 px-2.5 bg-white hover:bg-gray-50 text-indigo-700 border border-indigo-200 text-xs font-semibold rounded-xl transition-all"
+                      >
+                        + ชุดว่าง (จิ้มหน้าเอง)
+                      </button>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-indigo-100 flex items-center gap-2">
+                      <span className="text-[11px] text-indigo-800 whitespace-nowrap">หรือแบ่งเท่าๆ กันทีละ</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max={Math.max(1, totalPages)}
+                        value={chunkSizeInput}
+                        onChange={(e) => setChunkSizeInput(e.target.value)}
+                        className="w-16 py-1 px-2 text-xs font-bold text-center rounded-lg border border-indigo-200 bg-white"
+                      />
+                      <span className="text-[11px] text-indigo-800">หน้า</span>
+                      <button
+                        type="button"
+                        onClick={autoSplitByChunkSize}
+                        className="ml-auto px-2.5 py-1 bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-semibold"
+                      >
+                        แบ่งอัตโนมัติ
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-700">รายการชุดที่จัดไว้ ({sets.length} ชุด)</span>
+                      {sets.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => { setSets([]); setActiveSetId(null); setSetResults([]); }}
+                          className="text-[11px] text-red-500 hover:underline"
+                        >
+                          ล้างทุกชุด
+                        </button>
+                      )}
+                    </div>
+
+                    {sets.length === 0 ? (
+                      <div className="p-6 text-center rounded-xl border border-dashed border-gray-200 text-xs text-gray-400">
+                        ยังไม่มีชุดเอกสาร — ใส่จำนวนหน้าด้านบนแล้วกด &ldquo;สร้างชุด&rdquo; ได้เลย
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                        {sets.map((st, idx) => {
+                          const color = setColors[idx % setColors.length];
+                          const isActive = activeSetId === st.id;
+                          return (
+                            <div
+                              key={st.id}
+                              onClick={() => setActiveSetId(st.id)}
+                              className={`p-3 rounded-xl border-2 cursor-pointer transition-all space-y-2 ${
+                                isActive ? `${color.border} ${color.light}` : 'border-gray-200 bg-white hover:border-gray-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className={`w-3 h-3 rounded-full shrink-0 ${color.bg}`} />
+                                <input
+                                  type="text"
+                                  value={st.name}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => updateSetName(st.id, e.target.value)}
+                                  className="flex-1 text-xs font-bold bg-transparent outline-none border-b border-transparent focus:border-indigo-400"
+                                />
+                                <span className="text-[11px] font-mono font-semibold text-gray-600 shrink-0">
+                                  {st.pages.length} หน้า
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); deleteSet(st.id); }}
+                                  className="p-1 text-gray-400 hover:text-red-500"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-gray-500 shrink-0">ช่วงหน้า:</span>
+                                <input
+                                  type="text"
+                                  defaultValue={formatPagesRange(st.pages)}
+                                  key={`${st.id}-${st.pages.join(',')}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onBlur={(e) => updateSetPagesFromRange(st.id, e.target.value)}
+                                  placeholder="เช่น 1-10, 15"
+                                  className="flex-1 text-[11px] font-mono px-2 py-1 rounded-lg bg-white border border-gray-200 outline-none focus:border-indigo-400"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => buildAllSets(true)}
+                      disabled={isProcessing || sets.filter((s) => s.pages.length > 0).length === 0}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all"
+                    >
+                      {isProcessing ? (
+                        <><span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span><span>{statusMsg}</span></>
+                      ) : (
+                        <><Download size={18} /><span>แยกทั้งหมด ({sets.filter((s) => s.pages.length > 0).length} ชุด) และโหลด ZIP</span></>
+                      )}
+                    </button>
+                  </div>
+
+                  {setResults.length > 0 && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 animate-fade-in">
+                      <div className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                        <Check size={15} /> ดาวน์โหลดแยกทีละชุดได้เช่นกัน:
+                      </div>
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                        {setResults.map((res) => (
+                          <a
+                            key={res.id}
+                            href={res.url}
+                            download={res.fileName}
+                            className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-emerald-100 hover:border-emerald-400 text-xs text-gray-800 transition-all"
+                          >
+                            <span className="truncate font-medium">
+                              {res.name} <span className="text-gray-400">({res.pageCount} หน้า)</span>
+                            </span>
+                            <Download size={14} className="text-emerald-600 shrink-0 ml-2" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-2">
+                <div className="lg:col-span-7 space-y-3">
+                  <div className="flex items-center justify-between text-xs text-gray-600">
+                    <span>
+                      💡 คลิกที่หน้ากระดาษเพื่อเพิ่ม/ลบเข้าชุดที่กำลังเลือกอยู่
+                      {activeSetId && sets.find((s) => s.id === activeSetId)
+                        ? ` (${sets.find((s) => s.id === activeSetId).name})`
+                        : ''}
+                    </span>
+                    <span className="text-gray-400">แสดง {pages.length}/{totalPages} หน้า</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[580px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-100">
+                    {pages.map((page) => {
+                      const info = getPageSetInfo(page.pageNumber);
+                      return (
+                        <div
+                          key={page.index}
+                          onClick={() => togglePageInActiveSet(page.pageNumber)}
+                          className={`relative group cursor-pointer border-2 rounded-lg overflow-hidden bg-white transition-all ${
+                            info ? `${info.color.border} ring-2 ring-offset-1 ring-indigo-100` : 'border-gray-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <div className="aspect-[3/4] bg-gray-100 relative">
+                            <img src={page.imgData} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
+                          </div>
+                          {info && (
+                            <div className={`absolute top-1.5 left-1.5 right-1.5 ${info.color.bg} text-white text-[10px] font-bold px-1.5 py-0.5 rounded truncate text-center shadow`}>
+                              ชุด {info.setIndex + 1}
+                            </div>
+                          )}
+                          <div className="bg-white/95 text-center py-1 text-[11px] font-medium text-gray-600 border-t border-gray-100">
+                            หน้า {page.pageNumber}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                    <input
+                      type="text"
+                      value={rangeInput}
+                      onChange={(e) => setRangeInput(e.target.value)}
+                      placeholder="พิมพ์ช่วงหน้า เช่น 1-5, 8, 12-20"
+                      className="flex-1 px-3 py-2 text-xs rounded-xl border border-gray-200 font-mono outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={applyRangeToSingleExtract}
+                      className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl"
+                    >
+                      เลือกตามช่วง
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-gray-600">เลือกแล้ว {selectedPages.size} หน้า</span>
+                    <button type="button" onClick={selectAll} className="text-xs text-indigo-600 hover:underline font-semibold">
+                      {selectedPages.size === totalPages ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 max-h-[480px] overflow-y-auto p-2 bg-gray-50 rounded-xl">
                   {pages.map((page) => (
                     <div
                       key={page.index}
                       onClick={() => togglePage(page.index)}
-                      className={`relative group cursor-pointer border-2 rounded-lg overflow-hidden transition-all ${selectedPages.has(page.index) ? 'border-indigo-600 ring-2 ring-indigo-100' : 'border-gray-200 hover:border-indigo-300'}`}
+                      className={`relative group cursor-pointer border-2 rounded-lg overflow-hidden bg-white transition-all ${
+                        selectedPages.has(page.index) ? 'border-indigo-600 ring-2 ring-indigo-100' : 'border-gray-200 hover:border-indigo-300'
+                      }`}
                     >
                       <div className="aspect-[3/4] bg-gray-100 relative">
                         <img src={page.imgData} alt={`Page ${page.pageNumber}`} className="w-full h-full object-contain" />
-                        <div className={`absolute inset-0 transition-colors ${selectedPages.has(page.index) ? 'bg-indigo-600/10' : 'group-hover:bg-black/5'}`} />
                       </div>
-                      <div className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all ${selectedPages.has(page.index) ? 'bg-indigo-600 text-white scale-100' : 'bg-gray-200 text-transparent scale-90 group-hover:scale-100'}`}>
+                      <div className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center ${selectedPages.has(page.index) ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-transparent border border-gray-300'}`}>
                         <Check size={14} />
                       </div>
-                      <div className="absolute bottom-0 inset-x-0 bg-white/90 text-center py-1 text-xs font-medium text-gray-600 border-t border-gray-100">
+                      <div className="bg-white/90 text-center py-1 text-xs font-medium text-gray-600 border-t border-gray-100">
                         หน้า {page.pageNumber}
                       </div>
                     </div>
@@ -4756,22 +5276,25 @@ const PdfSplitter = () => {
                 </div>
 
                 <button
+                  type="button"
                   onClick={extractPages}
                   disabled={isProcessing || selectedPages.size === 0}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-100 flex justify-center items-center gap-2 disabled:opacity-50"
                 >
-                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Scissors size={20} /><span>แยกไฟล์ PDF (สร้างไฟล์ใหม่)</span></>}
+                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Scissors size={20} /><span>ดึง {selectedPages.size} หน้าที่เลือกเป็นไฟล์ PDF ใหม่</span></>}
                 </button>
 
                 {resultPdf && (
-                  <div className="space-y-4 animate-fade-in">
-                    <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2 font-bold text-green-700">
-                      <Check size={20} /> <span>เรียบร้อย!</span>
+                  <div className="space-y-3 animate-fade-in">
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center gap-2 font-bold text-emerald-700 text-sm">
+                      <Check size={18} /> <span>สร้างไฟล์ PDF เรียบร้อย!</span>
                     </div>
-                    <a href={resultPdf} download={`split-${file.name}`} className="block w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all text-center">ดาวน์โหลดไฟล์ใหม่</a>
+                    <a href={resultPdf} download={`split-${file.name}`} className="block w-full bg-gray-900 text-white font-semibold py-3 rounded-xl hover:bg-gray-800 transition-all text-center text-sm">
+                      ดาวน์โหลดไฟล์ใหม่
+                    </a>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
@@ -4780,168 +5303,429 @@ const PdfSplitter = () => {
   );
 };
 
-// 12. PDF Watermark
+// 12. PDF Watermark, Text, Stamp & Page Numbering Studio (WYSIWYG Direct Drag)
 const PdfWatermark = () => {
   const [file, setFile] = useState(null);
-  const [text, setText] = useState('สำเนาถูกต้อง');
-  const [fontSize, setFontSize] = useState(24);
-  const [opacity, setOpacity] = useState(0.5);
-  const [dragPos, setDragPos] = useState({ x: 0.5, y: 0.5 });
-  const mapRef = useRef(null);
-  const [isDragging, setIsDragging] = useState(false);
-
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [resultPdf, setResultPdf] = useState(null);
-  const [statusMsg, setStatusMsg] = useState('');
-  
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const previewTimer = useRef(null);
-  const [previewPage, setPreviewPage] = useState(1);
+  const [pdfBuffer, setPdfBuffer] = useState(null);
   const [totalPages, setTotalPages] = useState(1);
-  const [pdfAspectRatio, setPdfAspectRatio] = useState(1 / 1.414);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageImageUrl, setPageImageUrl] = useState(null);
+  const [pageDims, setPageDims] = useState({ width: 595, height: 842 }); // PDF points
+  const [previewWidth, setPreviewWidth] = useState(500);
+  const [isRenderingPage, setIsRenderingPage] = useState(false);
 
-  const updateDragPos = (e) => {
-    if (!mapRef.current) return;
-    const rect = mapRef.current.getBoundingClientRect();
-    
-    let clientX = e.clientX;
-    let clientY = e.clientY;
-    
-    if (e.touches && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
+  // Multi-layer items (Text & Image Stamps)
+  const [items, setItems] = useState([
+    {
+      id: 'item-1',
+      type: 'text',
+      text: 'สำเนาถูกต้อง',
+      x: 0.5,
+      y: 0.5,
+      fontSize: 36,
+      color: '#1d4ed8',
+      opacity: 0.55,
+      rotation: -30,
+      tiled: false,
+      pageScope: 'all', // all, current, first, custom
+      customPages: '1',
+      targetPage: 1
     }
-    
-    let x = (clientX - rect.left) / rect.width;
-    let y = (clientY - rect.top) / rect.height;
-    
-    x = Math.max(0, Math.min(1, x));
-    y = Math.max(0, Math.min(1, y));
-    setDragPos({ x, y });
-  };
+  ]);
+  const [selectedId, setSelectedId] = useState('item-1');
 
-  const handlePointerDown = (e) => {
-    setIsDragging(true);
-    updateDragPos(e);
-    if (e.target && e.target.setPointerCapture && e.pointerId) {
-      try { e.target.setPointerCapture(e.pointerId); } catch(err) {}
-    }
-  };
+  // Auto Page Numbering state
+  const [enablePageNum, setEnablePageNum] = useState(false);
+  const [pageNumPos, setPageNumPos] = useState('bottom-right'); // bottom-right, bottom-center, bottom-left, top-right, top-center
+  const [pageNumFormat, setPageNumFormat] = useState('{n} / {total}');
+  const [pageNumSize, setPageNumSize] = useState(14);
+  const [pageNumColor, setPageNumColor] = useState('#334155');
 
-  const handlePointerMove = (e) => {
-    if (isDragging) updateDragPos(e);
-  };
+  // Dragging state on real PDF preview
+  const [dragInfo, setDragInfo] = useState(null);
+  const stageRef = useRef(null);
+  const stampInputRef = useRef(null);
 
-  const handlePointerUp = (e) => {
-    setIsDragging(false);
-    if (e.target && e.target.releasePointerCapture && e.pointerId) {
-      try { e.target.releasePointerCapture(e.pointerId); } catch(err) {}
-    }
-  };
+  // Export state
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [resultPdf, setResultPdf] = useState(null);
 
-  const applyWatermarkToPdf = async (pdfDoc) => {
-    pdfDoc.registerFontkit(fontkit);
-    const fontUrl = './THSarabunPSK.ttf';
-    const fontBytes = await fetch(fontUrl).then((res) => res.arrayBuffer());
-    const customFont = await pdfDoc.embedFont(fontBytes);
+  const selectedItem = items.find((it) => it.id === selectedId) || items[0] || null;
+  const scaleRatio = pageDims.width > 0 ? previewWidth / pageDims.width : 1;
 
-    const pages = pdfDoc.getPages();
-    if (pages.length === 0) return;
+  // Observe rendered PDF preview width so font size & stamps scale 1:1 with real PDF points
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0) setPreviewWidth(rect.width);
+    };
+    updateWidth();
+    const ro = new ResizeObserver(updateWidth);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pageImageUrl]);
 
-    for (const page of pages) {
-      const { width, height } = page.getSize();
-      
-      const lines = text.split('\n');
-      const textWidth = Math.max(...lines.map(line => customFont.widthOfTextAtSize(line, fontSize)));
-      const fontHeight = customFont.heightAtSize(fontSize);
-      const lineHeight = fontHeight * 1.2;
-      const textHeight = lineHeight * lines.length;
-      
-      const centerX = width * dragPos.x;
-      const centerY = height * (1 - dragPos.y);
-      
-      const x = centerX - (textWidth / 2);
-      const y = centerY + (textHeight / 2) - fontHeight;
-
-      page.drawText(text, {
-        x,
-        y,
-        size: fontSize,
-        font: customFont,
-        color: rgb(0, 0, 0),
-        opacity: opacity,
-        lineHeight: lineHeight,
-      });
-    }
-  };
-
-  const handleFileChange = async (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setResultPdf(null);
-      setPreviewUrl(null);
-      setPreviewPage(1);
-
+  // Render active PDF page to high-res image via pdfjs
+  useEffect(() => {
+    if (!pdfBuffer) return;
+    let cancelled = false;
+    const renderPage = async () => {
+      setIsRenderingPage(true);
       try {
-        const arrayBuffer = await selectedFile.arrayBuffer();
-        const pdfDoc = await PDFDocument.load(arrayBuffer);
-        
-        setTotalPages(pdfDoc.getPageCount());
-        if (pdfDoc.getPageCount() > 0) {
-          const { width, height } = pdfDoc.getPages()[0].getSize();
-          setPdfAspectRatio(width / height);
+        // Clone buffer so pdfjs worker doesn't detach our stored ArrayBuffer
+        const copy = pdfBuffer.slice(0);
+        const pdf = await pdfjs.getDocument({ data: copy }).promise;
+        if (cancelled) return;
+        setTotalPages(pdf.numPages);
+        const safePage = Math.min(Math.max(1, currentPage), pdf.numPages);
+        const page = await pdf.getPage(safePage);
+        const baseViewport = page.getViewport({ scale: 1.0 });
+        setPageDims({ width: baseViewport.width, height: baseViewport.height });
+
+        const renderViewport = page.getViewport({ scale: 1.8 });
+        const canvas = document.createElement('canvas');
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+        if (!cancelled) {
+          setPageImageUrl(canvas.toDataURL('image/jpeg', 0.92));
         }
       } catch (err) {
-        console.error("Failed to parse PDF dimensions", err);
+        console.error('PDF page render error:', err);
+      } finally {
+        if (!cancelled) setIsRenderingPage(false);
+      }
+    };
+    renderPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfBuffer, currentPage]);
+
+  const handleFileChange = async (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+    setFile(selectedFile);
+    setResultPdf(null);
+    setCurrentPage(1);
+    const buf = await selectedFile.arrayBuffer();
+    setPdfBuffer(buf);
+    e.target.value = '';
+  };
+
+  // Parse custom page range string like "1-3, 5, 8-10" into Set of 1-based page numbers
+  const parsePageRange = (rangeStr, maxPages) => {
+    const set = new Set();
+    const parts = String(rangeStr || '').split(',');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      if (trimmed.includes('-')) {
+        const [a, b] = trimmed.split('-').map((n) => parseInt(n.trim(), 10));
+        if (!isNaN(a) && !isNaN(b)) {
+          const start = Math.max(1, Math.min(a, b));
+          const end = Math.min(maxPages, Math.max(a, b));
+          for (let p = start; p <= end; p++) set.add(p);
+        }
+      } else {
+        const p = parseInt(trimmed, 10);
+        if (!isNaN(p) && p >= 1 && p <= maxPages) set.add(p);
       }
     }
+    return set;
   };
 
-  const generatePreview = async () => {
-    if (!file || !text.trim()) return;
-    setIsPreviewLoading(true);
+  const isItemVisibleOnPage = (item, pageNum, maxPages) => {
+    if (item.pageScope === 'all') return true;
+    if (item.pageScope === 'first') return pageNum === 1;
+    if (item.pageScope === 'current') return pageNum === (item.targetPage || 1);
+    if (item.pageScope === 'custom') return parsePageRange(item.customPages, maxPages).has(pageNum);
+    return true;
+  };
 
+  const updateSelectedItem = (patch) => {
+    if (!selectedItem) return;
+    setItems((prev) => prev.map((it) => (it.id === selectedItem.id ? { ...it, ...patch } : it)));
+    setResultPdf(null);
+  };
+
+  const addTextItem = (preset = null) => {
+    const id = `item-${Date.now()}`;
+    const newItem = {
+      id,
+      type: 'text',
+      text: preset?.text || 'ข้อความใหม่',
+      x: preset?.x ?? 0.5,
+      y: preset?.y ?? 0.5,
+      fontSize: preset?.fontSize ?? 28,
+      color: preset?.color || '#1d4ed8',
+      opacity: preset?.opacity ?? 0.85,
+      rotation: preset?.rotation ?? 0,
+      tiled: preset?.tiled ?? false,
+      pageScope: 'all',
+      customPages: String(currentPage),
+      targetPage: currentPage
+    };
+    setItems((prev) => [...prev, newItem]);
+    setSelectedId(id);
+    setResultPdf(null);
+  };
+
+  const handleAddStampImage = (e) => {
+    const imgFile = e.target.files?.[0];
+    if (!imgFile || !imgFile.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = () => {
+        const id = `stamp-${Date.now()}`;
+        const newStamp = {
+          id,
+          type: 'image',
+          name: imgFile.name,
+          dataUrl,
+          mimeType: imgFile.type,
+          aspectRatio: img.naturalWidth / Math.max(1, img.naturalHeight),
+          x: 0.72,
+          y: 0.82,
+          widthRatio: 0.24,
+          opacity: 0.95,
+          rotation: 0,
+          pageScope: 'all',
+          customPages: String(currentPage),
+          targetPage: currentPage
+        };
+        setItems((prev) => [...prev, newStamp]);
+        setSelectedId(id);
+        setResultPdf(null);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(imgFile);
+    e.target.value = '';
+  };
+
+  const deleteItem = (id) => {
+    setItems((prev) => {
+      const next = prev.filter((it) => it.id !== id);
+      if (selectedId === id) setSelectedId(next[0]?.id || null);
+      return next;
+    });
+    setResultPdf(null);
+  };
+
+  // Direct Dragging on Real PDF Page
+  const handleItemPointerDown = (e, item) => {
+    if (item.tiled) return;
+    e.stopPropagation();
+    e.preventDefault();
+    setSelectedId(item.id);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const stageRect = stageRef.current?.getBoundingClientRect();
+    if (!stageRect) return;
+    setDragInfo({
+      id: item.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startX: item.x,
+      startY: item.y,
+      stageW: stageRect.width,
+      stageH: stageRect.height
+    });
+  };
+
+  const handleItemPointerMove = (e) => {
+    if (!dragInfo) return;
+    e.preventDefault();
+    const dx = (e.clientX - dragInfo.startClientX) / dragInfo.stageW;
+    const dy = (e.clientY - dragInfo.startClientY) / dragInfo.stageH;
+    const nextX = Math.min(0.98, Math.max(0.02, dragInfo.startX + dx));
+    const nextY = Math.min(0.98, Math.max(0.02, dragInfo.startY + dy));
+    setItems((prev) => prev.map((it) => (it.id === dragInfo.id ? { ...it, x: nextX, y: nextY } : it)));
+    setResultPdf(null);
+  };
+
+  const handleItemPointerUp = (e) => {
+    if (!dragInfo) return;
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
-      
-      await applyWatermarkToPdf(pdfDoc);
-
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-    } catch (error) {
-      console.error("Preview error:", error);
-    } finally {
-      setIsPreviewLoading(false);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
     }
+    setDragInfo(null);
   };
 
-  useEffect(() => {
-    if (previewTimer.current) clearTimeout(previewTimer.current);
-    previewTimer.current = setTimeout(() => {
-      generatePreview();
-    }, 500); // 500ms debounce
-    return () => clearTimeout(previewTimer.current);
-  }, [file, text, fontSize, opacity, dragPos]);
+  // Convert hex color (#RRGGBB) to pdf-lib rgb(r, g, b)
+  const hexToPdfRgb = (hex) => {
+    const clean = (hex || '#000000').replace('#', '');
+    if (clean.length !== 6) return rgb(0, 0, 0);
+    return rgb(
+      parseInt(clean.slice(0, 2), 16) / 255,
+      parseInt(clean.slice(2, 4), 16) / 255,
+      parseInt(clean.slice(4, 6), 16) / 255
+    );
+  };
 
+  // Helper: convert any image dataUrl to PNG bytes for guaranteed pdf-lib embedding
+  const dataUrlToPngBytes = async (dataUrl) => {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    return await blob.arrayBuffer();
+  };
 
+  // Helper: Draw centered & rotated multiline text on pdf-lib page matching CSS preview
+  const drawCenteredRotatedText = (page, textStr, centerX, centerY, size, font, colorObj, opacityVal, cssRotationDeg) => {
+    const lines = String(textStr || '').split('\n');
+    const lineHeight = size * 1.25;
+    const pdfAngleDeg = -cssRotationDeg; // CSS CW -> PDF CCW
+    const rad = (pdfAngleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
 
+    lines.forEach((line, idx) => {
+      if (!line) return;
+      const lineW = font.widthOfTextAtSize(line, size);
+      const localX = -lineW / 2;
+      const localY = ((lines.length - 1) / 2 - idx) * lineHeight - size * 0.32;
+
+      const x = centerX + localX * cos - localY * sin;
+      const y = centerY + localX * sin + localY * cos;
+
+      page.drawText(line, {
+        x,
+        y,
+        size,
+        font,
+        color: colorObj,
+        opacity: opacityVal,
+        rotate: degrees(pdfAngleDeg)
+      });
+    });
+  };
+
+  // Process & Export Final PDF
   const processPdf = async () => {
-    if (!file) return;
+    if (!pdfBuffer) return;
     setIsProcessing(true);
-    setStatusMsg('กำลังประมวลผล PDF...');
+    setStatusMsg('กำลังโหลดฟอนต์และประมวลผล PDF...');
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
-      
-      await applyWatermarkToPdf(pdfDoc);
+      const pdfDoc = await PDFDocument.load(pdfBuffer.slice(0));
+      pdfDoc.registerFontkit(fontkit);
+      const fontBytes = await fetch('./THSarabunPSK.ttf').then((res) => res.arrayBuffer());
+      const customFont = await pdfDoc.embedFont(fontBytes);
 
-      setStatusMsg('กำลังบันทึกไฟล์...');
+      // Pre-embed all image stamps once
+      const embeddedImages = {};
+      for (const item of items) {
+        if (item.type === 'image' && item.dataUrl) {
+          const pngBytes = await dataUrlToPngBytes(item.dataUrl);
+          embeddedImages[item.id] = await pdfDoc.embedPng(pngBytes);
+        }
+      }
+
+      const pages = pdfDoc.getPages();
+      const total = pages.length;
+
+      for (let i = 0; i < total; i++) {
+        const page = pages[i];
+        const pageNum = i + 1;
+        const { width, height } = page.getSize();
+
+        // Draw all active items for this page
+        for (const item of items) {
+          if (!isItemVisibleOnPage(item, pageNum, total)) continue;
+
+          if (item.type === 'text' && item.text.trim()) {
+            const colorObj = hexToPdfRgb(item.color);
+            if (item.tiled) {
+              const cols = 3;
+              const rows = 4;
+              for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                  const cx = ((c + 0.5) / cols) * width;
+                  const cy = ((r + 0.5) / rows) * height;
+                  drawCenteredRotatedText(page, item.text, cx, cy, item.fontSize, customFont, colorObj, item.opacity, item.rotation);
+                }
+              }
+            } else {
+              const cx = width * item.x;
+              const cy = height * (1 - item.y);
+              drawCenteredRotatedText(page, item.text, cx, cy, item.fontSize, customFont, colorObj, item.opacity, item.rotation);
+            }
+          } else if (item.type === 'image' && embeddedImages[item.id]) {
+            const pdfImg = embeddedImages[item.id];
+            const drawW = width * item.widthRatio;
+            const drawH = drawW / Math.max(0.05, item.aspectRatio);
+            const cx = width * item.x;
+            const cy = height * (1 - item.y);
+            const pdfAngleDeg = -item.rotation;
+            const rad = (pdfAngleDeg * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            const localX = -drawW / 2;
+            const localY = -drawH / 2;
+
+            page.drawImage(pdfImg, {
+              x: cx + localX * cos - localY * sin,
+              y: cy + localX * sin + localY * cos,
+              width: drawW,
+              height: drawH,
+              opacity: item.opacity,
+              rotate: degrees(pdfAngleDeg)
+            });
+          }
+        }
+
+        // Draw Auto Page Number if enabled
+        if (enablePageNum) {
+          const label = pageNumFormat.replace('{n}', String(pageNum)).replace('{total}', String(total));
+          const textW = customFont.widthOfTextAtSize(label, pageNumSize);
+          const marginX = 36;
+          const marginY = 26;
+          let px = width - marginX - textW;
+          let py = marginY;
+
+          if (pageNumPos === 'bottom-center') {
+            px = (width - textW) / 2;
+            py = marginY;
+          } else if (pageNumPos === 'bottom-left') {
+            px = marginX;
+            py = marginY;
+          } else if (pageNumPos === 'top-right') {
+            px = width - marginX - textW;
+            py = height - marginY - pageNumSize;
+          } else if (pageNumPos === 'top-center') {
+            px = (width - textW) / 2;
+            py = height - marginY - pageNumSize;
+          }
+
+          page.drawText(label, {
+            x: px,
+            y: py,
+            size: pageNumSize,
+            font: customFont,
+            color: hexToPdfRgb(pageNumColor)
+          });
+        }
+      }
+
+      setStatusMsg('กำลังบันทึกไฟล์ PDF...');
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -4949,159 +5733,1130 @@ const PdfWatermark = () => {
       setStatusMsg('เสร็จสิ้น!');
     } catch (error) {
       console.error(error);
-      setStatusMsg('เกิดข้อผิดพลาดในการประมวลผล');
+      setStatusMsg('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const quickPresets = [
+    { label: 'สำเนาถูกต้อง', text: 'สำเนาถูกต้อง', color: '#1d4ed8', rotation: -30, opacity: 0.55, tiled: false, fontSize: 38 },
+    { label: 'ใช้สำหรับ...เท่านั้น', text: 'ใช้สำหรับสมัครงานเท่านั้น', color: '#1d4ed8', rotation: -35, opacity: 0.45, tiled: false, fontSize: 32 },
+    { label: 'ลับ (CONFIDENTIAL)', text: 'ลับ (CONFIDENTIAL)', color: '#dc2626', rotation: -35, opacity: 0.5, tiled: false, fontSize: 36 },
+    { label: 'ด่วนที่สุด', text: 'ด่วนที่สุด', color: '#dc2626', rotation: 0, opacity: 0.9, tiled: false, fontSize: 30 },
+    { label: 'ลายน้ำเต็มหน้า', text: 'สำเนาถูกต้อง — ห้ามคัดลอก', color: '#475569', rotation: -35, opacity: 0.25, tiled: true, fontSize: 22 }
+  ];
+
+  const colorSwatches = ['#000000', '#1d4ed8', '#dc2626', '#047857', '#475569', '#7c3aed'];
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
-      <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-        <h2 className="text-xl font-bold flex items-center gap-2"><Type className="text-indigo-600" /> ใส่ข้อความบน PDF (Watermark)</h2>
-        <p className="text-sm text-gray-500 mt-1">ใส่ข้อความ "สำเนาถูกต้อง" (หรือข้อความอื่น) ลงในทุกหน้าของไฟล์ PDF</p>
-      </div>
-      <div className="p-6 flex-1 overflow-y-auto">
-        {!file ? (
-          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors">
-            <input type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" id="pdf-watermark-upload" />
-            <label htmlFor="pdf-watermark-upload" className="cursor-pointer flex flex-col items-center">
-              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-4"><Upload size={32} /></div>
-              <span className="text-lg font-medium">อัปโหลดไฟล์ PDF</span>
-              <span className="text-sm text-gray-500 mt-1">คลิกที่นี่เพื่อเลือกไฟล์</span>
-            </label>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <Type size={22} />
           </div>
-        ) : (
-          <div className="h-full flex flex-col lg:flex-row gap-6">
-            <div className="flex-1 space-y-6 lg:max-w-md">
-              <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between border border-gray-100">
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <FileType className="text-indigo-600 shrink-0" size={24} />
-                  <span className="font-medium truncate">{file.name}</span>
-                  <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{formatSize(file.size)}</span>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">ใส่ข้อความ / ลายน้ำ / ลายเซ็น PDF</h2>
+            <p className="text-xs text-gray-500">
+              ลากวางข้อความและลายเซ็นบนหน้า PDF จริงได้โดยตรง รองรับหลายกล่อง หมุนองศา ลายน้ำเต็มหน้า และเลขหน้าอัตโนมัติ
+            </p>
+          </div>
+        </div>
+
+        {file && (
+          <button
+            type="button"
+            onClick={() => {
+              setFile(null);
+              setPdfBuffer(null);
+              setPageImageUrl(null);
+              setResultPdf(null);
+            }}
+            className="self-start sm:self-auto px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-xl flex items-center gap-1.5 transition-all"
+          >
+            <Trash2 size={14} /> เปลี่ยนไฟล์ PDF
+          </button>
+        )}
+      </div>
+
+      {!file ? (
+        <div className="bg-white p-12 rounded-2xl shadow-sm border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-gray-50/60 transition-all text-center">
+          <input type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" id="pdf-watermark-upload" />
+          <label htmlFor="pdf-watermark-upload" className="cursor-pointer flex flex-col items-center space-y-3">
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+              <Upload size={32} />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-gray-800">คลิกเพื่ออัปโหลดไฟล์ PDF</p>
+              <p className="text-xs text-gray-500 mt-1">ใส่ข้อความภาษาไทย (TH Sarabun), ลายน้ำเฉียง, รูปลายเซ็น PNG และเลขหน้าอัตโนมัติ</p>
+            </div>
+          </label>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left: Controls & Layers (5 cols) */}
+          <div className="lg:col-span-5 space-y-4">
+            {/* Layer Manager Card */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-gray-700">เลเยอร์บนเอกสาร ({items.length})</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => addTextItem()}
+                    className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold flex items-center gap-1"
+                  >
+                    <Plus size={13} /> เพิ่มข้อความ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => stampInputRef.current?.click()}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold flex items-center gap-1"
+                  >
+                    <ImageIcon size={13} /> ลายเซ็น/รูป
+                  </button>
+                  <input ref={stampInputRef} type="file" accept="image/*" onChange={handleAddStampImage} className="hidden" />
                 </div>
-                <button onClick={() => { setFile(null); setResultPdf(null); setPreviewUrl(null); }} className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button>
               </div>
 
-              {!resultPdf ? (
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ข้อความ (หลายบรรทัดได้)</label>
-                    <textarea
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
-                      rows="3"
-                      placeholder={"สำเนาถูกต้อง\n1 มกราคม 2567"}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className="space-y-6">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          ขนาดตัวอักษร: {fontSize} pt
-                        </label>
-                        <input
-                          type="range"
-                          min="16"
-                          max="60"
-                          value={fontSize}
-                          onChange={(e) => setFontSize(Number(e.target.value))}
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          ความโปร่งแสง: {Math.round(opacity * 100)}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0.1"
-                          max="1.0"
-                          step="0.1"
-                          value={opacity}
-                          onChange={(e) => setOpacity(Number(e.target.value))}
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Drag Map Area */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        ตำแหน่ง (ลากวางได้)
-                      </label>
-                      <div className="w-full aspect-[1/1.414] max-h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 relative overflow-hidden mx-auto touch-none select-none"
-                           ref={mapRef}
-                           onPointerDown={handlePointerDown}
-                           onPointerMove={handlePointerMove}
-                           onPointerUp={handlePointerUp}
-                           onPointerCancel={handlePointerUp}
-                           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-                      >
-                         <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 pointer-events-none">
-                            <FileType size={32} />
-                         </div>
-                         <div 
-                           className="absolute w-8 h-6 bg-indigo-500/80 rounded border-2 border-indigo-600 pointer-events-none flex items-center justify-center text-white"
-                           style={{ 
-                             left: `${dragPos.x * 100}%`, 
-                             top: `${dragPos.y * 100}%`,
-                             transform: 'translate(-50%, -50%)',
-                             boxShadow: '0 0 0 2px rgba(255,255,255,0.5)'
-                           }}
-                         >
-                            <Type size={12} />
-                         </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={processPdf}
-                    disabled={isProcessing || !text.trim()}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-indigo-200 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                {items.map((it, idx) => (
+                  <div
+                    key={it.id}
+                    onClick={() => setSelectedId(it.id)}
+                    className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      selectedId === it.id
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-800 font-semibold'
+                        : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                    }`}
                   >
-                    {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg}</span></> : <><Type size={20} /><span>ดำเนินการทุกหน้า</span></>}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center justify-between font-bold text-green-700">
-                    <div className="flex items-center gap-2"><Check size={20} /> <span>ประมวลผลเสร็จสิ้น!</span></div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {it.type === 'text' ? <Type size={14} className="shrink-0" /> : <ImageIcon size={14} className="shrink-0" />}
+                      <span className="truncate">
+                        {it.type === 'text' ? (it.text.split('\n')[0] || `ข้อความ #${idx + 1}`) : (it.name || `ลายเซ็น/รูป #${idx + 1}`)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); deleteItem(it.id); }}
+                      className="p-1 text-gray-400 hover:text-red-500 rounded"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                  <div className="flex flex-col gap-4">
-                      <a href={resultPdf} download={`watermark-${file.name}`} className="block w-full bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-all text-center flex justify-center items-center gap-2"><Download size={18} /> ดาวน์โหลดไฟล์ใหม่</a>
-                      <button onClick={() => { setFile(null); setResultPdf(null); setPreviewUrl(null); }} className="block w-full bg-gray-100 text-gray-800 font-medium py-3 rounded-xl hover:bg-gray-200 transition-all text-center">ทำไฟล์อื่นต่อ</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Selected Layer Properties */}
+            {selectedItem && (
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                {selectedItem.type === 'text' ? (
+                  <>
+                    {/* Quick Stamps */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">ข้อความสำเร็จรูป (คลิกเปลี่ยนทันที)</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {quickPresets.map((p, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => updateSelectedItem({
+                              text: p.text,
+                              color: p.color,
+                              rotation: p.rotation,
+                              opacity: p.opacity,
+                              tiled: p.tiled,
+                              fontSize: p.fontSize
+                            })}
+                            className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-indigo-50 hover:text-indigo-700 text-[11px] font-medium text-gray-700 transition-all"
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Textarea */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">ข้อความ (รองรับหลายบรรทัด)</label>
+                      <textarea
+                        rows={2}
+                        value={selectedItem.text}
+                        onChange={(e) => updateSelectedItem({ text: e.target.value })}
+                        placeholder={"สำเนาถูกต้อง\nวันที่ 19 พ.ย. 2569"}
+                        className="w-full p-2.5 text-sm border border-gray-200 rounded-xl focus:border-indigo-500 outline-none resize-y"
+                      />
+                    </div>
+
+                    {/* Color Picker */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">สีข้อความ</label>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {colorSwatches.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => updateSelectedItem({ color: c })}
+                            className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                              selectedItem.color === c ? 'border-indigo-600 scale-110' : 'border-gray-200'
+                            }`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                        <input
+                          type="color"
+                          value={selectedItem.color}
+                          onChange={(e) => updateSelectedItem({ color: e.target.value })}
+                          className="w-8 h-7 rounded border cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Size & Opacity */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ขนาด: {selectedItem.fontSize} pt</label>
+                        <input type="range" min="10" max="96" value={selectedItem.fontSize} onChange={(e) => updateSelectedItem({ fontSize: Number(e.target.value) })} className="w-full accent-indigo-600" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ความเข้ม: {Math.round(selectedItem.opacity * 100)}%</label>
+                        <input type="range" min="0.1" max="1" step="0.05" value={selectedItem.opacity} onChange={(e) => updateSelectedItem({ opacity: Number(e.target.value) })} className="w-full accent-indigo-600" />
+                      </div>
+                    </div>
+
+                    {/* Rotation & Tiled Mode */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-gray-700">องศาหมุน: {selectedItem.rotation}°</span>
+                        <div className="flex gap-1.5">
+                          <button type="button" onClick={() => updateSelectedItem({ rotation: 0 })} className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[11px]">แนวนอน 0°</button>
+                          <button type="button" onClick={() => updateSelectedItem({ rotation: -35 })} className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[11px]">เฉียง -35°</button>
+                          <button type="button" onClick={() => updateSelectedItem({ rotation: -45 })} className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[11px]">เฉียง -45°</button>
+                        </div>
+                      </div>
+                      <input type="range" min="-90" max="90" value={selectedItem.rotation} onChange={(e) => updateSelectedItem({ rotation: Number(e.target.value) })} className="w-full accent-indigo-600" />
+
+                      <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer pt-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedItem.tiled}
+                          onChange={(e) => updateSelectedItem({ tiled: e.target.checked })}
+                          className="rounded accent-indigo-600 w-4 h-4"
+                        />
+                        <span>โหมดลายน้ำปูซ้ำเต็มหน้ากระดาษ (Tile Pattern)</span>
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  /* Image Stamp Properties */
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <img src={selectedItem.dataUrl} alt="stamp" className="w-12 h-12 object-contain bg-gray-50 rounded-lg border p-1" />
+                      <div className="text-xs">
+                        <div className="font-semibold text-gray-800">รูปลายเซ็น / ตราประทับ</div>
+                        <div className="text-gray-500">ลากวางตำแหน่งบนหน้า PDF ด้านขวาได้เลย</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ขนาด: {Math.round(selectedItem.widthRatio * 100)}%</label>
+                        <input type="range" min="0.06" max="0.75" step="0.02" value={selectedItem.widthRatio} onChange={(e) => updateSelectedItem({ widthRatio: Number(e.target.value) })} className="w-full accent-indigo-600" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ความเข้ม: {Math.round(selectedItem.opacity * 100)}%</label>
+                        <input type="range" min="0.1" max="1" step="0.05" value={selectedItem.opacity} onChange={(e) => updateSelectedItem({ opacity: Number(e.target.value) })} className="w-full accent-indigo-600" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">หมุนองศา: {selectedItem.rotation}°</label>
+                      <input type="range" min="-90" max="90" value={selectedItem.rotation} onChange={(e) => updateSelectedItem({ rotation: Number(e.target.value) })} className="w-full accent-indigo-600" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Page Scope Selector */}
+                <div className="pt-3 border-t border-gray-100 space-y-2">
+                  <label className="block text-xs font-semibold text-gray-700">แสดงเลเยอร์นี้ในหน้าใดบ้าง</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: 'all', label: 'ทุกหน้า' },
+                      { id: 'current', label: `เฉพาะหน้านี้ (${currentPage})` },
+                      { id: 'first', label: 'เฉพาะหน้าแรก' },
+                      { id: 'custom', label: 'ระบุช่วงหน้า' }
+                    ].map((sc) => (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        onClick={() => updateSelectedItem({ pageScope: sc.id, targetPage: currentPage })}
+                        className={`py-1.5 px-2 rounded-lg border text-xs font-medium transition-all ${
+                          selectedItem.pageScope === sc.id
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                            : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {sc.label}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedItem.pageScope === 'custom' && (
+                    <input
+                      type="text"
+                      value={selectedItem.customPages}
+                      onChange={(e) => updateSelectedItem({ customPages: e.target.value })}
+                      placeholder="เช่น 1-3, 5, 7"
+                      className="w-full p-2 text-xs rounded-lg border border-gray-200 font-mono"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Auto Page Numbers Card */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-xs font-bold text-gray-700">ใส่เลขหน้าอัตโนมัติ (Page Numbers)</span>
+                <input
+                  type="checkbox"
+                  checked={enablePageNum}
+                  onChange={(e) => { setEnablePageNum(e.target.checked); setResultPdf(null); }}
+                  className="rounded accent-indigo-600 w-4 h-4"
+                />
+              </label>
+              {enablePageNum && (
+                <div className="grid grid-cols-2 gap-2.5 pt-1 animate-fade-in">
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">ตำแหน่ง</label>
+                    <select value={pageNumPos} onChange={(e) => setPageNumPos(e.target.value)} className="w-full p-2 text-xs rounded-lg border border-gray-200 bg-white">
+                      <option value="bottom-right">มุมขวาล่าง</option>
+                      <option value="bottom-center">กึ่งกลางล่าง</option>
+                      <option value="bottom-left">มุมซ้ายล่าง</option>
+                      <option value="top-right">มุมขวาบน</option>
+                      <option value="top-center">กึ่งกลางบน</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">รูปแบบ</label>
+                    <select value={pageNumFormat} onChange={(e) => setPageNumFormat(e.target.value)} className="w-full p-2 text-xs rounded-lg border border-gray-200 bg-white">
+                      <option value="{n} / {total}">1 / {totalPages}</option>
+                      <option value="หน้า {n} / {total}">หน้า 1 / {totalPages}</option>
+                      <option value="- {n} -">- 1 -</option>
+                      <option value="{n}">1</option>
+                    </select>
                   </div>
                 </div>
               )}
             </div>
-            
-            {/* Live Preview Column */}
-            <div className="flex-1 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden flex flex-col h-[500px] lg:h-auto min-h-[400px]">
-              <div className="p-3 bg-white border-b border-gray-200 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700 flex items-center gap-2"><Eye size={16} className="text-gray-400"/> ภาพตัวอย่าง PDF</span>
-                {isPreviewLoading && <span className="flex items-center gap-2 text-xs text-indigo-600"><span className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-600"></span> กำลังเปลี่ยนหน้า...</span>}
-              </div>
-              
-              <div className="flex-1 relative bg-gray-50/50">
-                {previewUrl ? (
-                  <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`} className="w-full h-full border-0" title="PDF Preview" />
+
+            {/* Export / Download Button */}
+            {!resultPdf ? (
+              <button
+                type="button"
+                onClick={processPdf}
+                disabled={isProcessing || (items.length === 0 && !enablePageNum)}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-indigo-100 transition-all flex justify-center items-center gap-2"
+              >
+                {isProcessing ? (
+                  <>
+                    <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span>
+                    <span>{statusMsg}</span>
+                  </>
                 ) : (
-                  <div className="absolute inset-0 flex flex-col gap-3 items-center justify-center text-gray-400">
-                    <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></span>
-                    <span>กำลังโหลดตัวอย่าง...</span>
+                  <>
+                    <Check size={19} />
+                    <span>บันทึกและสร้างไฟล์ PDF ใหม่</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="space-y-2.5 animate-fade-in">
+                <a
+                  href={resultPdf}
+                  download={`marked-${file.name}`}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-emerald-100 transition-all flex justify-center items-center gap-2"
+                >
+                  <Download size={19} />
+                  <span>ดาวน์โหลดไฟล์ PDF เรียบร้อย!</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setResultPdf(null)}
+                  className="w-full py-2.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-xl border border-gray-200"
+                >
+                  แก้ไขตำแหน่งเพิ่มเติม
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Interactive WYSIWYG Real PDF Canvas (7 cols) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+            <div className="p-3.5 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                <Eye size={15} className="text-indigo-600" />
+                <span>หน้ากระดาษจริง (คลิกลากวางตำแหน่งได้ทันที)</span>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded-lg bg-white border border-gray-200 disabled:opacity-40"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <span className="font-semibold text-gray-700 px-1.5">
+                    หน้า {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded-lg bg-white border border-gray-200 disabled:opacity-40"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 sm:p-6 bg-slate-200/80 min-h-[520px] flex items-center justify-center overflow-auto">
+              {isRenderingPage && !pageImageUrl ? (
+                <div className="text-center text-gray-500 space-y-2">
+                  <span className="animate-spin inline-block rounded-full h-8 w-8 border-b-2 border-indigo-600"></span>
+                  <p className="text-xs">กำลังแสดงหน้า PDF...</p>
+                </div>
+              ) : pageImageUrl ? (
+                <div
+                  ref={stageRef}
+                  onPointerMove={handleItemPointerMove}
+                  onPointerUp={handleItemPointerUp}
+                  onPointerCancel={handleItemPointerUp}
+                  className="relative inline-block max-w-full bg-white shadow-xl border border-gray-300 select-none touch-none overflow-hidden"
+                >
+                  <img
+                    src={pageImageUrl}
+                    alt={`PDF Page ${currentPage}`}
+                    draggable={false}
+                    className="block max-h-[680px] w-auto max-w-full pointer-events-none select-none"
+                  />
+
+                  {/* Render Interactive Overlays on Current Page */}
+                  {items.map((item) => {
+                    if (!isItemVisibleOnPage(item, currentPage, totalPages)) return null;
+                    const isSelected = item.id === selectedId;
+
+                    if (item.type === 'text' && item.tiled) {
+                      return (
+                        <div key={item.id} className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-4">
+                          {Array.from({ length: 12 }).map((_, idx) => (
+                            <div key={idx} className="flex items-center justify-center overflow-hidden">
+                              <div
+                                style={{
+                                  fontFamily: 'THSarabunPSK, sans-serif',
+                                  fontSize: `${Math.max(8, item.fontSize * scaleRatio)}px`,
+                                  lineHeight: 1.25,
+                                  color: item.color,
+                                  opacity: item.opacity,
+                                  transform: `rotate(${item.rotation}deg)`,
+                                  whiteSpace: 'pre',
+                                  textAlign: 'center'
+                                }}
+                              >
+                                {item.text}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    if (item.type === 'text') {
+                      return (
+                        <div
+                          key={item.id}
+                          onPointerDown={(e) => handleItemPointerDown(e, item)}
+                          className={`absolute cursor-move px-2 py-0.5 rounded transition-shadow ${
+                            isSelected ? 'ring-2 ring-indigo-500 ring-dashed bg-indigo-500/5' : 'hover:ring-1 hover:ring-indigo-300'
+                          }`}
+                          style={{
+                            left: `${item.x * 100}%`,
+                            top: `${item.y * 100}%`,
+                            transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
+                            fontFamily: 'THSarabunPSK, sans-serif',
+                            fontSize: `${Math.max(8, item.fontSize * scaleRatio)}px`,
+                            lineHeight: 1.25,
+                            color: item.color,
+                            opacity: item.opacity,
+                            whiteSpace: 'pre',
+                            textAlign: 'center'
+                          }}
+                        >
+                          {item.text || ' '}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={item.id}
+                        onPointerDown={(e) => handleItemPointerDown(e, item)}
+                        className={`absolute cursor-move ${
+                          isSelected ? 'ring-2 ring-indigo-500 ring-dashed' : 'hover:ring-1 hover:ring-indigo-300'
+                        }`}
+                        style={{
+                          left: `${item.x * 100}%`,
+                          top: `${item.y * 100}%`,
+                          width: `${item.widthRatio * 100}%`,
+                          transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
+                          opacity: item.opacity
+                        }}
+                      >
+                        <img src={item.dataUrl} alt="stamp" draggable={false} className="w-full h-auto block pointer-events-none" />
+                      </div>
+                    );
+                  })}
+
+                  {/* Live Page Number Overlay */}
+                  {enablePageNum && (
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{
+                        fontFamily: 'THSarabunPSK, sans-serif',
+                        fontSize: `${Math.max(8, pageNumSize * scaleRatio)}px`,
+                        color: pageNumColor,
+                        bottom: pageNumPos.startsWith('bottom') ? `${26 * scaleRatio}px` : 'auto',
+                        top: pageNumPos.startsWith('top') ? `${26 * scaleRatio}px` : 'auto',
+                        right: pageNumPos.endsWith('right') ? `${36 * scaleRatio}px` : 'auto',
+                        left: pageNumPos.endsWith('left')
+                          ? `${36 * scaleRatio}px`
+                          : pageNumPos.endsWith('center')
+                          ? '50%'
+                          : 'auto',
+                        transform: pageNumPos.endsWith('center') ? 'translateX(-50%)' : 'none'
+                      }}
+                    >
+                      {pageNumFormat.replace('{n}', String(currentPage)).replace('{total}', String(totalPages))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 13. Bulk File & Folder Renamer (Native Windows In-Place Rename + Undo + Web ZIP Fallback)
+const BulkRenamer = () => {
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+
+  const [folderPath, setFolderPath] = useState('');
+  const [items, setItems] = useState([]); // [{ id, name, baseName, ext, isDirectory, fullPath, parentDir, fileObj?, selected }]
+  const [targetFilter, setTargetFilter] = useState('all'); // all, files, folders
+
+  // Rename Rules
+  const [renameMode, setRenameMode] = useState('modify'); // modify (prefix/suffix/replace), sequence (new pattern + numbering)
+  const [prefix, setPrefix] = useState('');
+  const [suffix, setSuffix] = useState('');
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
+  const [patternBase, setPatternBase] = useState('เอกสาร_');
+  const [startNum, setStartNum] = useState(1);
+  const [padDigits, setPadDigits] = useState(3);
+  const [addDatePrefix, setAddDatePrefix] = useState(false);
+  const [caseMode, setCaseMode] = useState('keep'); // keep, lower, upper
+  const [replaceSpaces, setReplaceSpaces] = useState(false);
+
+  // Execution & Undo state
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [undoOps, setUndoOps] = useState(null);
+
+  const webFileInputRef = useRef(null);
+
+  const handleSelectFolderElectron = async () => {
+    setErrorMsg('');
+    setStatusMsg('');
+    if (!isElectron || !window.electronAPI?.selectFolderForRename) return;
+    const res = await window.electronAPI.selectFolderForRename();
+    if (res?.canceled) return;
+    if (res?.error) {
+      setErrorMsg(res.error);
+      return;
+    }
+    setFolderPath(res.folderPath || '');
+    setItems((res.items || []).map((it) => ({ ...it, selected: true })));
+    setUndoOps(null);
+  };
+
+  const handleSelectFilesElectron = async () => {
+    setErrorMsg('');
+    setStatusMsg('');
+    if (!isElectron || !window.electronAPI?.selectFilesForRename) return;
+    const res = await window.electronAPI.selectFilesForRename();
+    if (res?.canceled) return;
+    setFolderPath(res.folderPath || '');
+    setItems((res.items || []).map((it) => ({ ...it, selected: true })));
+    setUndoOps(null);
+  };
+
+  const handleSelectFilesWeb = (e) => {
+    const fileList = Array.from(e.target.files || []);
+    if (!fileList.length) return;
+    setErrorMsg('');
+    setStatusMsg('');
+    const mapped = fileList
+      .map((f, idx) => {
+        const dotIdx = f.name.lastIndexOf('.');
+        const ext = dotIdx > 0 ? f.name.slice(dotIdx) : '';
+        const baseName = dotIdx > 0 ? f.name.slice(0, dotIdx) : f.name;
+        return {
+          id: `web-${idx}-${f.name}`,
+          name: f.name,
+          baseName,
+          ext,
+          isDirectory: false,
+          fullPath: f.name,
+          parentDir: '',
+          fileObj: f,
+          selected: true
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    setItems(mapped);
+    setFolderPath('โหมดเว็บเบราว์เซอร์ (ดาวน์โหลดไฟล์ที่เปลี่ยนชื่อแล้วเป็น ZIP)');
+    e.target.value = '';
+  };
+
+  const visibleItems = useMemo(() => {
+    return items.filter((it) => {
+      if (targetFilter === 'files') return !it.isDirectory;
+      if (targetFilter === 'folders') return it.isDirectory;
+      return true;
+    });
+  }, [items, targetFilter]);
+
+  const toggleItemSelected = (id) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, selected: !it.selected } : it)));
+  };
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = new Set(visibleItems.map((it) => it.id));
+    const allSelected = visibleItems.every((it) => it.selected);
+    setItems((prev) =>
+      prev.map((it) => (visibleIds.has(it.id) ? { ...it, selected: !allSelected } : it))
+    );
+  };
+
+  // Compute live preview of new names
+  const previewRows = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let seqCounter = parseInt(startNum, 10) || 1;
+    const digits = Math.max(1, Math.min(6, parseInt(padDigits, 10) || 1));
+
+    const rows = visibleItems.map((it) => {
+      if (!it.selected) {
+        return { ...it, newName: it.name, changed: false };
+      }
+
+      let nextBase = it.baseName;
+
+      if (renameMode === 'sequence') {
+        const numStr = String(seqCounter).padStart(digits, '0');
+        seqCounter++;
+        nextBase = `${patternBase}${numStr}`;
+      } else {
+        if (findText) {
+          nextBase = nextBase.split(findText).join(replaceText);
+        }
+        nextBase = `${prefix}${nextBase}${suffix}`;
+      }
+
+      if (addDatePrefix) {
+        nextBase = `${todayStr}_${nextBase}`;
+      }
+      if (replaceSpaces) {
+        nextBase = nextBase.replace(/\s+/g, '_');
+      }
+      if (caseMode === 'lower') nextBase = nextBase.toLowerCase();
+      if (caseMode === 'upper') nextBase = nextBase.toUpperCase();
+
+      // Strip illegal Windows filename chars
+      nextBase = nextBase.replace(/[\\/:*?"<>|]/g, '').trim() || it.baseName;
+
+      const newName = `${nextBase}${it.ext}`;
+      return {
+        ...it,
+        newName,
+        changed: newName !== it.name
+      };
+    });
+
+    // Detect duplicate new names within the same parentDir
+    const nameCounts = {};
+    rows.forEach((r) => {
+      const key = `${r.parentDir}::${r.newName.toLowerCase()}`;
+      nameCounts[key] = (nameCounts[key] || 0) + 1;
+    });
+
+    return rows.map((r) => {
+      const key = `${r.parentDir}::${r.newName.toLowerCase()}`;
+      return { ...r, hasConflict: r.selected && nameCounts[key] > 1 };
+    });
+  }, [
+    visibleItems, renameMode, prefix, suffix, findText, replaceText,
+    patternBase, startNum, padDigits, addDatePrefix, caseMode, replaceSpaces
+  ]);
+
+  const changedCount = previewRows.filter((r) => r.selected && r.changed).length;
+  const hasAnyConflict = previewRows.some((r) => r.hasConflict);
+
+  const handleExecuteRename = async () => {
+    setErrorMsg('');
+    setStatusMsg('');
+    if (hasAnyConflict) {
+      setErrorMsg('พบชื่อซ้ำกันในรายการ กรุณาปรับรูปแบบชื่อ (เช่น เพิ่มเลขลำดับ) ก่อนดำเนินการ');
+      return;
+    }
+    const toRename = previewRows.filter((r) => r.selected && r.changed);
+    if (toRename.length === 0) {
+      setErrorMsg('ยังไม่มีรายการที่ชื่อเปลี่ยนแปลง');
+      return;
+    }
+
+    setIsRenaming(true);
+    try {
+      if (isElectron && window.electronAPI?.executeBulkRename) {
+        const sep = folderPath.includes('\\') ? '\\' : '/';
+        const operations = toRename.map((r) => ({
+          oldPath: r.fullPath,
+          newPath: `${r.parentDir}${r.parentDir.endsWith(sep) ? '' : sep}${r.newName}`
+        }));
+
+        const res = await window.electronAPI.executeBulkRename(operations);
+        if (!res?.success) {
+          setErrorMsg(res?.error || 'เปลี่ยนชื่อไม่สำเร็จ');
+          return;
+        }
+
+        // Update local list with new names & paths
+        const opMap = new Map(toRename.map((r, i) => [r.id, { newName: r.newName, newPath: operations[i].newPath }]));
+        setItems((prev) =>
+          prev.map((it) => {
+            const updated = opMap.get(it.id);
+            if (!updated) return it;
+            const ext = it.isDirectory ? '' : it.ext;
+            const baseName = it.isDirectory ? updated.newName : updated.newName.slice(0, updated.newName.length - ext.length);
+            return {
+              ...it,
+              id: updated.newPath,
+              name: updated.newName,
+              baseName,
+              fullPath: updated.newPath
+            };
+          })
+        );
+        setUndoOps(res.undoOperations || null);
+        setStatusMsg(`เปลี่ยนชื่อเรียบร้อยแล้ว ${res.renamedCount} รายการ!`);
+      } else {
+        // Web Fallback: Package renamed files into ZIP
+        const zip = new JSZip();
+        for (const r of previewRows) {
+          if (r.fileObj) {
+            zip.file(r.newName, r.fileObj);
+          }
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        saveAs(blob, `renamed-files-${new Date().toISOString().slice(0, 10)}.zip`);
+        setStatusMsg(`สร้างไฟล์ ZIP ที่เปลี่ยนชื่อแล้ว ${toRename.length} ไฟล์เรียบร้อย!`);
+      }
+    } catch (err) {
+      setErrorMsg('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleUndoRename = async () => {
+    if (!undoOps || !isElectron || !window.electronAPI?.executeBulkRename) return;
+    setIsRenaming(true);
+    setErrorMsg('');
+    try {
+      const res = await window.electronAPI.executeBulkRename(undoOps);
+      if (!res?.success) {
+        setErrorMsg(res?.error || 'ย้อนกลับไม่สำเร็จ');
+        return;
+      }
+      const reverseMap = new Map(undoOps.map((op) => [op.oldPath, op.newPath]));
+      setItems((prev) =>
+        prev.map((it) => {
+          const restoredPath = reverseMap.get(it.fullPath);
+          if (!restoredPath) return it;
+          const parts = restoredPath.split(/[/\\]/);
+          const restoredName = parts[parts.length - 1];
+          const ext = it.isDirectory ? '' : it.ext;
+          const baseName = it.isDirectory ? restoredName : restoredName.slice(0, restoredName.length - ext.length);
+          return {
+            ...it,
+            id: restoredPath,
+            name: restoredName,
+            baseName,
+            fullPath: restoredPath
+          };
+        })
+      );
+      setUndoOps(null);
+      setStatusMsg('ย้อนกลับเป็นชื่อเดิมเรียบร้อยแล้ว!');
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <FolderOpen size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">เปลี่ยนชื่อไฟล์ & โฟลเดอร์ทีละเยอะๆ</h2>
+            <p className="text-xs text-gray-500">
+              {isElectron
+                ? 'เลือกโฟลเดอร์หรือไฟล์บนเครื่อง Windows แล้วตั้งชื่อใหม่พร้อมกันได้ทันที (มีตัวอย่างก่อนเปลี่ยน + ปุ่มย้อนกลับ)'
+                : 'รองรับการเปลี่ยนชื่อหลายไฟล์พร้อมกัน (บนโปรแกรม Windows .exe จะเปลี่ยนชื่อไฟล์และโฟลเดอร์ในเครื่องได้โดยตรง)'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {isElectron ? (
+            <>
+              <button
+                type="button"
+                onClick={handleSelectFolderElectron}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm flex items-center gap-1.5"
+              >
+                <FolderOpen size={15} /> เลือกโฟลเดอร์
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectFilesElectron}
+                className="px-3.5 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 text-xs font-semibold rounded-xl flex items-center gap-1.5"
+              >
+                <Files size={15} /> เลือกเฉพาะไฟล์
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => webFileInputRef.current?.click()}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm flex items-center gap-1.5"
+              >
+                <Upload size={15} /> เลือกไฟล์หลายไฟล์
+              </button>
+              <input ref={webFileInputRef} type="file" multiple onChange={handleSelectFilesWeb} className="hidden" />
+            </>
+          )}
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <div
+          onClick={() => (isElectron ? handleSelectFolderElectron() : webFileInputRef.current?.click())}
+          className="bg-white p-12 rounded-2xl shadow-sm border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-gray-50/60 transition-all cursor-pointer text-center space-y-3"
+        >
+          <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto">
+            <FolderOpen size={32} />
+          </div>
+          <p className="font-semibold text-gray-800 text-base">
+            {isElectron ? 'คลิกเพื่อเลือกโฟลเดอร์ที่มีไฟล์หรือโฟลเดอร์ย่อยที่ต้องการเปลี่ยนชื่อ' : 'คลิกเพื่อเลือกไฟล์ที่ต้องการเปลี่ยนชื่อพร้อมกัน'}
+          </p>
+          <p className="text-xs text-gray-500">
+            รองรับการเพิ่มคำนำหน้า/ต่อท้าย, ค้นหาและแทนที่คำ, รันเลขลำดับ (001, 002...) และย้อนกลับได้ในคลิกเดียว
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left: Rename Rules (5 cols) */}
+          <div className="lg:col-span-5 bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-5">
+            {/* Mode Switch */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRenameMode('modify')}
+                className={`py-2.5 px-3 rounded-xl border-2 text-xs font-semibold transition-all ${
+                  renameMode === 'modify' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                }`}
+              >
+                ✏️ แก้ไข / เติมคำ
+              </button>
+              <button
+                type="button"
+                onClick={() => setRenameMode('sequence')}
+                className={`py-2.5 px-3 rounded-xl border-2 text-xs font-semibold transition-all ${
+                  renameMode === 'sequence' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                }`}
+              >
+                🔢 ตั้งชื่อใหม่ + รันเลข
+              </button>
+            </div>
+
+            {renameMode === 'modify' ? (
+              <div className="space-y-3.5 animate-fade-in">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">คำนำหน้า (Prefix)</label>
+                    <input
+                      type="text"
+                      value={prefix}
+                      onChange={(e) => setPrefix(e.target.value)}
+                      placeholder="เช่น 2569_"
+                      className="w-full p-2.5 text-sm rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                    />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">คำต่อท้าย (Suffix)</label>
+                    <input
+                      type="text"
+                      value={suffix}
+                      onChange={(e) => setSuffix(e.target.value)}
+                      placeholder="เช่น _final"
+                      className="w-full p-2.5 text-sm rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">ค้นหาคำเดิม (Find)</label>
+                    <input
+                      type="text"
+                      value={findText}
+                      onChange={(e) => setFindText(e.target.value)}
+                      placeholder="เช่น Copy of "
+                      className="w-full p-2.5 text-sm rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">แทนที่ด้วย (Replace)</label>
+                    <input
+                      type="text"
+                      value={replaceText}
+                      onChange={(e) => setReplaceText(e.target.value)}
+                      placeholder="(เว้นว่าง = ลบออก)"
+                      className="w-full p-2.5 text-sm rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3.5 animate-fade-in">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">ชื่อหลัก (Base Name)</label>
+                  <input
+                    type="text"
+                    value={patternBase}
+                    onChange={(e) => setPatternBase(e.target.value)}
+                    placeholder="เช่น เอกสาร_, IMG_, โฟลเดอร์ชุด_"
+                    className="w-full p-2.5 text-sm rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">เริ่มนับจากเลข</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={startNum}
+                      onChange={(e) => setStartNum(e.target.value)}
+                      className="w-full p-2.5 text-sm font-mono rounded-xl border border-gray-200 outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">จำนวนหลัก (เช่น 3 = 001)</label>
+                    <select
+                      value={padDigits}
+                      onChange={(e) => setPadDigits(Number(e.target.value))}
+                      className="w-full p-2.5 text-sm rounded-xl border border-gray-200 bg-white outline-none"
+                    >
+                      <option value={1}>1 หลัก (1, 2, 3)</option>
+                      <option value={2}>2 หลัก (01, 02, 03)</option>
+                      <option value={3}>3 หลัก (001, 002, 003)</option>
+                      <option value={4}>4 หลัก (0001, 0002)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <hr className="border-gray-100" />
+
+            {/* Extra Formatting Options */}
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-gray-700">ตัวพิมพ์ภาษาอังกฤษ</span>
+                <select value={caseMode} onChange={(e) => setCaseMode(e.target.value)} className="p-1.5 rounded-lg border border-gray-200 bg-white text-xs">
+                  <option value="keep">คงเดิม</option>
+                  <option value="lower">ตัวเล็กทั้งหมด (abc)</option>
+                  <option value="upper">ตัวใหญ่ทั้งหมด (ABC)</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={addDatePrefix} onChange={(e) => setAddDatePrefix(e.target.checked)} className="rounded accent-indigo-600 w-4 h-4" />
+                <span>เติมวันที่วันนี้ข้างหน้าอัตโนมัติ ({new Date().toISOString().slice(0, 10)}_)</span>
+              </label>
+              <label className="flex items-center gap-2 text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={replaceSpaces} onChange={(e) => setReplaceSpaces(e.target.checked)} className="rounded accent-indigo-600 w-4 h-4" />
+                <span>เปลี่ยนช่องว่างทั้งหมดเป็นขีดล่าง (_)</span>
+              </label>
+            </div>
+
+            {errorMsg && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs flex items-center gap-2">
+                <AlertCircle size={16} className="shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {statusMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-xs font-semibold flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5"><Check size={16} /> {statusMsg}</span>
+                {undoOps && (
+                  <button
+                    type="button"
+                    onClick={handleUndoRename}
+                    className="px-2.5 py-1 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[11px] font-bold flex items-center gap-1"
+                  >
+                    <Undo2 size={12} /> ย้อนกลับ
+                  </button>
                 )}
               </div>
-            </div>
-            
+            )}
+
+            {/* Execute Button */}
+            <button
+              type="button"
+              onClick={handleExecuteRename}
+              disabled={isRenaming || changedCount === 0 || hasAnyConflict}
+              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-100 transition-all flex items-center justify-center gap-2"
+            >
+              <Check size={18} />
+              <span>
+                {isRenaming
+                  ? 'กำลังเปลี่ยนชื่อ...'
+                  : isElectron
+                  ? `ยืนยันเปลี่ยนชื่อ (${changedCount} รายการ)`
+                  : `เปลี่ยนชื่อและดาวน์โหลด ZIP (${changedCount} ไฟล์)`}
+              </span>
+            </button>
           </div>
-        )}
-      </div>
+
+          {/* Right: Live Before -> After Preview Table (7 cols) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+            <div className="p-3.5 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-gray-700 truncate max-w-[260px]" title={folderPath}>
+                📂 {folderPath || 'รายการไฟล์'}
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs">
+                {[
+                  { id: 'all', label: 'ทั้งหมด' },
+                  { id: 'files', label: 'เฉพาะไฟล์' },
+                  { id: 'folders', label: 'เฉพาะโฟลเดอร์' }
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setTargetFilter(f.id)}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                      targetFilter === f.id ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-4 py-2 bg-white border-b border-gray-100 flex items-center justify-between text-xs text-gray-500">
+              <label className="flex items-center gap-2 cursor-pointer font-medium">
+                <input
+                  type="checkbox"
+                  checked={visibleItems.length > 0 && visibleItems.every((it) => it.selected)}
+                  onChange={toggleSelectAllVisible}
+                  className="rounded accent-indigo-600"
+                />
+                <span>เลือกทั้งหมด ({visibleItems.filter((it) => it.selected).length} / {visibleItems.length})</span>
+              </label>
+              <span className="text-indigo-600 font-semibold">จะเปลี่ยนชื่อ {changedCount} รายการ</span>
+            </div>
+
+            <div className="max-h-[520px] overflow-y-auto divide-y divide-gray-100">
+              {previewRows.length === 0 ? (
+                <div className="p-10 text-center text-xs text-gray-400">ไม่พบรายการในตัวกรองนี้</div>
+              ) : (
+                previewRows.map((row) => (
+                  <div
+                    key={row.id}
+                    onClick={() => toggleItemSelected(row.id)}
+                    className={`px-4 py-2.5 flex items-center gap-3 text-xs cursor-pointer transition-colors ${
+                      row.hasConflict
+                        ? 'bg-red-50'
+                        : row.selected && row.changed
+                        ? 'bg-indigo-50/35 hover:bg-indigo-50/60'
+                        : 'hover:bg-gray-50 opacity-65'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={row.selected}
+                      onChange={() => {}}
+                      className="rounded accent-indigo-600 shrink-0"
+                    />
+                    {row.isDirectory ? (
+                      <Folder size={16} className="text-amber-500 shrink-0" />
+                    ) : (
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-11 gap-1 items-center">
+                      <span className="sm:col-span-5 truncate text-gray-600 font-mono" title={row.name}>
+                        {row.name}
+                      </span>
+                      <span className="hidden sm:flex sm:col-span-1 justify-center text-gray-400">
+                        <ArrowRight size={13} />
+                      </span>
+                      <span
+                        className={`sm:col-span-5 truncate font-mono font-semibold ${
+                          row.hasConflict
+                            ? 'text-red-600'
+                            : row.changed
+                            ? 'text-indigo-700'
+                            : 'text-gray-400'
+                        }`}
+                        title={row.newName}
+                      >
+                        {row.newName}
+                        {row.hasConflict ? ' (ชื่อซ้ำ!)' : ''}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -5226,6 +6981,7 @@ const App = () => {
     { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
+    { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
   ];
 
   return (
@@ -5366,6 +7122,7 @@ const App = () => {
             {activeTab === 'pdf_split' && <PdfSplitter />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
+            {activeTab === 'bulk_rename' && <BulkRenamer />}
           </div>
         </div>
       </main>

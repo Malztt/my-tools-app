@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
   copyImageToClipboard: (dataUrl) => ipcRenderer.invoke('copy-image-to-clipboard', dataUrl),
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  selectFolderForRename: () => ipcRenderer.invoke('select-folder-for-rename'),
+  selectFilesForRename: () => ipcRenderer.invoke('select-files-for-rename'),
+  executeBulkRename: (operations) => ipcRenderer.invoke('execute-bulk-rename', operations),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadAndInstallUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
   onUpdateProgress: (callback) => {

@@ -7,6 +7,7 @@ const {
   screen,
   clipboard,
   nativeImage,
+  dialog,
   shell
 } = require('electron');
 const path = require('path');
@@ -401,6 +402,120 @@ ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
     return { success: true };
   } catch (err) {
     return { success: false, error: 'อัปเดตไม่สำเร็จ: ' + err.message };
+  }
+});
+
+ipcMain.handle('select-folder-for-rename', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'เลือกโฟลเดอร์ที่ต้องการเปลี่ยนชื่อไฟล์/โฟลเดอร์ย่อย'
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+
+  const folderPath = result.filePaths[0];
+  try {
+    const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    const items = entries
+      .map((entry) => {
+        const fullPath = path.join(folderPath, entry.name);
+        const isDirectory = entry.isDirectory();
+        const ext = isDirectory ? '' : path.extname(entry.name);
+        const baseName = isDirectory ? entry.name : path.basename(entry.name, ext);
+        return {
+          id: fullPath,
+          name: entry.name,
+          fullPath,
+          parentDir: folderPath,
+          isDirectory,
+          ext,
+          baseName
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+    return { canceled: false, folderPath, items };
+  } catch (err) {
+    return { canceled: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('select-files-for-rename', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    title: 'เลือกไฟล์ที่ต้องการเปลี่ยนชื่อ'
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+
+  const items = result.filePaths
+    .map((fullPath) => {
+      const name = path.basename(fullPath);
+      const ext = path.extname(name);
+      const baseName = path.basename(name, ext);
+      return {
+        id: fullPath,
+        name,
+        fullPath,
+        parentDir: path.dirname(fullPath),
+        isDirectory: false,
+        ext,
+        baseName
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  return { canceled: false, folderPath: path.dirname(result.filePaths[0]), items };
+});
+
+ipcMain.handle('execute-bulk-rename', async (_event, operations) => {
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return { success: false, error: 'ไม่มีรายการที่จะเปลี่ยนชื่อ' };
+  }
+
+  const changedOps = operations.filter((op) => op.oldPath && op.newPath && op.oldPath !== op.newPath);
+  if (changedOps.length === 0) {
+    return { success: false, error: 'ชื่อใหม่เหมือนชื่อเดิมทั้งหมด' };
+  }
+
+  // Two-phase safe rename to avoid name collisions (e.g. 01 -> 02, 02 -> 01)
+  const tempSteps = [];
+  const finalCompleted = [];
+  const stamp = Date.now();
+
+  try {
+    // Phase 1: oldPath -> unique temp path
+    for (let i = 0; i < changedOps.length; i++) {
+      const op = changedOps[i];
+      const dir = path.dirname(op.oldPath);
+      const tmpPath = path.join(dir, `.__wt_tmp_${stamp}_${i}_${path.basename(op.oldPath)}`);
+      fs.renameSync(op.oldPath, tmpPath);
+      tempSteps.push({ ...op, tmpPath });
+    }
+
+    // Phase 2: temp path -> newPath
+    for (let i = 0; i < tempSteps.length; i++) {
+      const step = tempSteps[i];
+      fs.renameSync(step.tmpPath, step.newPath);
+      finalCompleted.push({ oldPath: step.oldPath, newPath: step.newPath });
+    }
+
+    const undoOperations = finalCompleted.map((c) => ({
+      oldPath: c.newPath,
+      newPath: c.oldPath
+    }));
+
+    return { success: true, renamedCount: finalCompleted.length, undoOperations };
+  } catch (err) {
+    // Attempt rollback of any temp files still present
+    for (const step of tempSteps) {
+      try {
+        if (fs.existsSync(step.tmpPath) && !fs.existsSync(step.oldPath)) {
+          fs.renameSync(step.tmpPath, step.oldPath);
+        }
+      } catch {
+        // ignore rollback error
+      }
+    }
+    return { success: false, error: 'เปลี่ยนชื่อไม่สำเร็จ (ไฟล์อาจถูกเปิดใช้งานอยู่): ' + err.message };
   }
 });
 
