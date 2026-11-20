@@ -369,17 +369,18 @@ ipcMain.handle('download-and-install-update', async (_event, downloadUrl) => {
     }
 
     // Create a self-cleaning Windows batch script that waits for the portable app to close,
-    // replaces the old Portable .exe with the newly downloaded .exe, and launches it!
+    // replaces the old Portable .exe with the newly downloaded .exe (even across drives), and launches it!
     const batContent = [
       '@echo off',
       'chcp 65001 > nul',
       'ping 127.0.0.1 -n 4 > nul',
       ':retry',
-      `move /y "${downloadedTmpExe}" "${targetExePath}" > nul 2>&1`,
+      `copy /y "${downloadedTmpExe}" "${targetExePath}" > nul 2>&1`,
       'if errorlevel 1 (',
       '  ping 127.0.0.1 -n 2 > nul',
       '  goto retry',
       ')',
+      `del /f /q "${downloadedTmpExe}" > nul 2>&1`,
       `start "" "${targetExePath}"`,
       'del "%~f0"'
     ].join('\r\n');

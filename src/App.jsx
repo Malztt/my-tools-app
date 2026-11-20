@@ -618,33 +618,6 @@ const QRCodeGenerator = () => {
     customEyeColor, eyeFrameColor, eyeBallColor, logoSize, logoMargin, hideBgDots
   ]);
 
-  // Scannability / Contrast Ratio Check (WCAG luminance)
-  const contrastStatus = useMemo(() => {
-    if (transparentBg) {
-      return { level: 'info', text: 'พื้นหลังโปร่งใส — ควรวางบนพื้นสีที่ตัดกับตัว QR' };
-    }
-    const hexToLum = (hex) => {
-      const clean = (hex || '#000000').replace('#', '');
-      if (clean.length !== 6) return 0;
-      const r = parseInt(clean.slice(0, 2), 16) / 255;
-      const g = parseInt(clean.slice(2, 4), 16) / 255;
-      const b = parseInt(clean.slice(4, 6), 16) / 255;
-      const toLin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-      return 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
-    };
-    const lBg = hexToLum(bgColor);
-    const lFg = hexToLum(fgType === 'single' ? fgColor : gradientColor1);
-    const ratio = (Math.max(lBg, lFg) + 0.05) / (Math.min(lBg, lFg) + 0.05);
-
-    if (ratio >= 4.5) {
-      return { level: 'good', text: `สแกนง่ายมาก (ความคมชัด ${ratio.toFixed(1)}:1)` };
-    }
-    if (ratio >= 2.5) {
-      return { level: 'warn', text: `ความคมชัดปานกลาง (${ratio.toFixed(1)}:1) — แนะนำให้ทดสอบสแกน` };
-    }
-    return { level: 'bad', text: `สีใกล้เคียงกันเกินไป (${ratio.toFixed(1)}:1) — อาจสแกนไม่ติด!` };
-  }, [transparentBg, bgColor, fgType, fgColor, gradientColor1]);
-
   const handleSelectDefaultLogo = async (logoPath, index) => {
     setSelectedDefaultLogoIdx(index);
     setErrorLevel('H'); // Auto boost error correction for logo scannability
@@ -1635,22 +1608,6 @@ const QRCodeGenerator = () => {
                     {frameText || 'สแกนที่นี่'}
                   </div>
                 )}
-              </div>
-
-              {/* Scannability / Contrast Badge */}
-              <div
-                className={`mt-3 px-3 py-1.5 rounded-full text-[11px] font-medium flex items-center gap-1.5 ${
-                  contrastStatus.level === 'good'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : contrastStatus.level === 'warn'
-                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                    : contrastStatus.level === 'bad'
-                    ? 'bg-red-50 text-red-600 border border-red-200'
-                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                }`}
-              >
-                <ShieldCheck size={14} />
-                <span>{contrastStatus.text}</span>
               </div>
             </div>
 
