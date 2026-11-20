@@ -1260,108 +1260,299 @@ const ImageStudio = () => {
   );
 };
 
-// 3. PDF Optimizer (Rasterize Pages to Images)
+// 3. PDF Optimizer (Target Size MB, Grayscale, Presets, Lossless, Before/After Preview & Batch ZIP)
 const PdfOptimizer = () => {
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]); // Array of File
+  const [preset, setPreset] = useState('balanced'); // extreme, balanced, high, lossless, target, custom
+  const [qualityLevel, setQualityLevel] = useState(65); // 10-100 for custom
+  const [targetSizeMB, setTargetSizeMB] = useState(2); // MB for target mode
+  const [isGrayscale, setIsGrayscale] = useState(false);
+
+  // Single-file metadata & Before/After preview
+  const [numPages, setNumPages] = useState(0);
+  const [beforePreview, setBeforePreview] = useState(null);
+  const [afterPreview, setAfterPreview] = useState(null);
+  const [estimatedNewSize, setEstimatedNewSize] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Processing & Results
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processedPdf, setProcessedPdf] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [progress, setProgress] = useState(0);
-  const [qualityLevel, setQualityLevel] = useState(70); // 10-100
+  const [results, setResults] = useState([]); // [{ name, originalSize, newSize, url }]
+  const [zipUrl, setZipUrl] = useState(null);
 
-  const [numPages, setNumPages] = useState(0);
+  const isBatch = files.length > 1;
+  const primaryFile = files[0] || null;
 
-  const handleFileChange = async (e) => {
-    if (e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setProcessedPdf(null);
-      setStatusMsg('');
-      setProgress(0);
-
-      // Get page count for estimation
-      try {
-        const arrayBuffer = await selectedFile.arrayBuffer();
-        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-        setNumPages(pdf.numPages);
-      } catch (err) {
-        console.error("Error reading PDF metadata:", err);
-        setNumPages(0);
-      }
-    }
+  // Map preset/slider to (scale, jpegQuality)
+  const getCompressionParams = (mode, qLvl) => {
+    if (mode === 'extreme') return { scale: 0.85, jpegQuality: 0.36 };
+    if (mode === 'balanced') return { scale: 1.15, jpegQuality: 0.58 };
+    if (mode === 'high') return { scale: 1.5, jpegQuality: 0.80 };
+    const ratio = qLvl / 100;
+    return {
+      scale: 0.65 + 0.95 * ratio,
+      jpegQuality: 0.22 + 0.65 * ratio
+    };
   };
 
-  const processPdf = async () => {
-    if (!file) return;
-    setIsProcessing(true);
-    setStatusMsg('กำลังเตรียมการ...');
+  // Render a single PDF page to compressed JPEG DataURL (with optional grayscale)
+  const renderPageToJpeg = async (page, scale, jpegQuality, grayscale) => {
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    if (grayscale) {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let p = 0; p < d.length; p += 4) {
+        const lum = Math.round(0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]);
+        // Slight contrast boost so scanned Thai text stays crisp
+        const boosted = Math.min(255, Math.max(0, Math.round((lum - 128) * 1.12 + 128)));
+        d[p] = boosted;
+        d[p + 1] = boosted;
+        d[p + 2] = boosted;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', jpegQuality));
+    const arrayBuf = await blob.arrayBuffer();
+    return { blob, arrayBuf, dataUrl: URL.createObjectURL(blob) };
+  };
+
+  const handleFileChange = async (e) => {
+    const picked = Array.from(e.target.files || []).filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+    if (picked.length === 0) return;
+
+    setFiles(picked);
+    setResults([]);
+    setZipUrl(null);
+    setStatusMsg('');
     setProgress(0);
+    setBeforePreview(null);
+    setAfterPreview(null);
+    setEstimatedNewSize(null);
 
-    try {
-      // Import libraries dynamically
-      // const PDFLib = await import('pdf-lib');
-      // const pdfjs = await import('pdfjs-dist');
+    if (picked.length === 1) {
+      try {
+        const buf = await picked[0].arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: buf }).promise;
+        setNumPages(pdf.numPages);
+        const page1 = await pdf.getPage(1);
+        const orig = await renderPageToJpeg(page1, 1.35, 0.92, false);
+        setBeforePreview(orig.dataUrl);
+      } catch (err) {
+        console.error('Error reading PDF metadata:', err);
+        setNumPages(0);
+      }
+    } else {
+      setNumPages(0);
+    }
+    e.target.value = '';
+  };
 
-      // Set worker source (using unpkg for better compatibility with newer versions)
-      // pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  // Live debounced Page-1 After Preview for single file
+  useEffect(() => {
+    if (!primaryFile || isBatch) return;
+    if (preset === 'lossless') {
+      setAfterPreview(beforePreview);
+      setEstimatedNewSize(null);
+      return;
+    }
 
-      const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
-      const numPages = pdf.numPages;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const buf = await primaryFile.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: buf }).promise;
+        const page1 = await pdf.getPage(1);
 
+        let scale = 1.15;
+        let jpegQuality = 0.58;
+
+        if (preset === 'target') {
+          const targetBytes = Math.max(0.1, Number(targetSizeMB) || 1) * 1024 * 1024;
+          const perPageBudget = (targetBytes * 0.92) / Math.max(1, pdf.numPages);
+          let low = 10;
+          let high = 95;
+          let best = { scale: 0.7, jpegQuality: 0.28 };
+          for (let iter = 0; iter < 4; iter++) {
+            const mid = Math.round((low + high) / 2);
+            const p = getCompressionParams('custom', mid);
+            const sample = await renderPageToJpeg(page1, p.scale, p.jpegQuality, isGrayscale);
+            URL.revokeObjectURL(sample.dataUrl);
+            if (sample.blob.size <= perPageBudget) {
+              best = p;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
+          }
+          scale = best.scale;
+          jpegQuality = best.jpegQuality;
+        } else {
+          const params = getCompressionParams(preset, qualityLevel);
+          scale = params.scale;
+          jpegQuality = params.jpegQuality;
+        }
+
+        const rendered = await renderPageToJpeg(page1, scale, jpegQuality, isGrayscale);
+        if (!cancelled) {
+          setAfterPreview(rendered.dataUrl);
+          setEstimatedNewSize(Math.round(rendered.blob.size * pdf.numPages * 1.05));
+        } else {
+          URL.revokeObjectURL(rendered.dataUrl);
+        }
+      } catch {
+        // ignore preview errors
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }, 320);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [primaryFile, isBatch, preset, qualityLevel, targetSizeMB, isGrayscale, beforePreview]);
+
+  // Compress a single PDF File -> Uint8Array
+  const compressSinglePdfFile = async (pdfFile, fileIndex, totalFiles) => {
+    const arrayBuffer = await pdfFile.arrayBuffer();
+
+    // Lossless structure optimization (keeps text selectable & searchable)
+    if (preset === 'lossless') {
+      setStatusMsg(`กำลังจัดโครงสร้างไฟล์ ${pdfFile.name}...`);
+      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+      pdfDoc.setTitle('');
+      pdfDoc.setAuthor('');
+      pdfDoc.setSubject('');
+      pdfDoc.setKeywords([]);
+      pdfDoc.setProducer('');
+      pdfDoc.setCreator('');
+      return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    }
+
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer.slice(0) }).promise;
+    const pageCount = pdf.numPages;
+
+    // Determine optimal (scale, jpegQuality)
+    let { scale, jpegQuality } = getCompressionParams(preset, qualityLevel);
+
+    if (preset === 'target') {
+      const targetBytes = Math.max(0.1, Number(targetSizeMB) || 1) * 1024 * 1024;
+      const perPageBudget = (targetBytes * 0.92) / Math.max(1, pageCount);
+      setStatusMsg(`กำลังคำนวณระดับบีบอัดให้ไม่เกิน ${targetSizeMB} MB...`);
+
+      const samplePage = await pdf.getPage(1);
+      let low = 5;
+      let high = 95;
+      let best = { scale: 0.65, jpegQuality: 0.22 };
+
+      for (let iter = 0; iter < 5; iter++) {
+        const mid = Math.round((low + high) / 2);
+        const p = getCompressionParams('custom', mid);
+        const test = await renderPageToJpeg(samplePage, p.scale, p.jpegQuality, isGrayscale);
+        URL.revokeObjectURL(test.dataUrl);
+        if (test.blob.size <= perPageBudget) {
+          best = p;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      scale = best.scale;
+      jpegQuality = best.jpegQuality;
+    }
+
+    const buildCompressedDoc = async (useScale, useQuality) => {
       const newPdfDoc = await PDFDocument.create();
-
-      for (let i = 1; i <= numPages; i++) {
-        setStatusMsg(`กำลังแปลงหน้า ${i} จาก ${numPages}...`);
-        setProgress(Math.round((i / numPages) * 100));
+      for (let i = 1; i <= pageCount; i++) {
+        const prefixText = totalFiles > 1 ? `ไฟล์ ${fileIndex + 1}/${totalFiles} • ` : '';
+        setStatusMsg(`${prefixText}กำลังบีบอัดหน้า ${i} / ${pageCount}...`);
+        const overallPct = Math.round(((fileIndex + i / pageCount) / totalFiles) * 100);
+        setProgress(overallPct);
 
         const page = await pdf.getPage(i);
+        // Preserve exact physical A4/original page size in points!
+        const baseViewport = page.getViewport({ scale: 1.0 });
+        const rendered = await renderPageToJpeg(page, useScale, useQuality, isGrayscale);
+        URL.revokeObjectURL(rendered.dataUrl);
 
-
-        // Determine scale and quality based on slider (10-100)
-        // Tune formula to favor size reduction
-        const qualityVal = qualityLevel / 100;
-
-        // Scale: 0.5 to 1.5 (Reduced from 2.0 max)
-        const scale = 0.5 + (1.0 * (qualityLevel / 100));
-
-        // JPEG Quality: 0.2 to 0.8 (Capped at 0.8 to ensure compression)
-        const quality = 0.2 + (0.6 * qualityVal);
-
-        const viewport = page.getViewport({ scale: scale });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-
-        await page.render({ canvasContext: context, viewport: viewport }).promise;
-
-        // Convert to JPEG
-        const imgDataUrl = canvas.toDataURL('image/jpeg', quality);
-        const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
-
-        const jpgImage = await newPdfDoc.embedJpg(imgBytes);
-        const newPage = newPdfDoc.addPage([jpgImage.width, jpgImage.height]);
+        const jpgImage = await newPdfDoc.embedJpg(rendered.arrayBuf);
+        const newPage = newPdfDoc.addPage([baseViewport.width, baseViewport.height]);
         newPage.drawImage(jpgImage, {
           x: 0,
           y: 0,
-          width: jpgImage.width,
-          height: jpgImage.height,
+          width: baseViewport.width,
+          height: baseViewport.height
+        });
+      }
+      return await newPdfDoc.save({ useObjectStreams: true });
+    };
+
+    let pdfBytes = await buildCompressedDoc(scale, jpegQuality);
+
+    // If Target Size mode slightly overshot, do 1 quick refinement pass
+    if (preset === 'target') {
+      const targetBytes = Math.max(0.1, Number(targetSizeMB) || 1) * 1024 * 1024;
+      if (pdfBytes.byteLength > targetBytes) {
+        setStatusMsg(`ปรับลดขนาดเพิ่มเพื่อให้ไม่เกิน ${targetSizeMB} MB...`);
+        const shrinkFactor = Math.sqrt(targetBytes / pdfBytes.byteLength) * 0.9;
+        const refinedScale = Math.max(0.55, scale * shrinkFactor);
+        const refinedQuality = Math.max(0.18, jpegQuality * shrinkFactor);
+        pdfBytes = await buildCompressedDoc(refinedScale, refinedQuality);
+      }
+    }
+
+    return pdfBytes;
+  };
+
+  const processPdfs = async () => {
+    if (files.length === 0) return;
+    setIsProcessing(true);
+    setResults([]);
+    setZipUrl(null);
+    setProgress(0);
+    setStatusMsg('กำลังเตรียมการ...');
+
+    try {
+      const outList = [];
+      const zip = new JSZip();
+
+      for (let idx = 0; idx < files.length; idx++) {
+        const f = files[idx];
+        const pdfBytes = await compressSinglePdfFile(f, idx, files.length);
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const outName = `compressed-${f.name}`;
+        zip.file(outName, pdfBytes);
+        outList.push({
+          name: f.name,
+          outName,
+          originalSize: f.size,
+          newSize: pdfBytes.byteLength,
+          url
         });
       }
 
-      setStatusMsg('กำลังรวมไฟล์ PDF...');
-      const pdfBytes = await newPdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-
-      setProcessedPdf({
-        url: url,
-        size: pdfBytes.byteLength
-      });
-      setStatusMsg('เสร็จสิ้น!');
-
+      setResults(outList);
+      if (outList.length > 1) {
+        setStatusMsg('กำลังรวมไฟล์ทั้งหมดเป็น ZIP...');
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        setZipUrl(URL.createObjectURL(zipBlob));
+      }
+      setProgress(100);
+      setStatusMsg('บีบอัดเสร็จสิ้น!');
     } catch (err) {
       console.error(err);
       setStatusMsg('เกิดข้อผิดพลาด: ' + err.message);
@@ -1371,72 +1562,301 @@ const PdfOptimizer = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-800">จัดการไฟล์ PDF</h2>
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-sm">
+            <FileType size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">บีบอัดไฟล์ PDF</h2>
+            <p className="text-xs text-gray-500">
+              ลดขนาดไฟล์ PDF คงขนาดหน้ากระดาษ A4 เดิม 100% รองรับตั้งเป้าขนาดไม่เกิน (MB), โหมดขาว-ดำ และบีบหลายไฟล์พร้อมกัน
+            </p>
+          </div>
+        </div>
+
+        {files.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { setFiles([]); setResults([]); setZipUrl(null); setBeforePreview(null); setAfterPreview(null); }}
+            className="self-start sm:self-auto px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-xl flex items-center gap-1.5"
+          >
+            <Trash2 size={14} /> เลือกไฟล์ใหม่
+          </button>
+        )}
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        {!file ? (
-          <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
-            <input type="file" accept=".pdf" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-            <div className="bg-red-100 text-red-600 rounded-full p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center"><FileType size={32} /></div>
-            <p className="font-medium text-gray-700">อัปโหลดไฟล์ PDF</p>
+      {files.length === 0 ? (
+        <div className="bg-white p-12 rounded-2xl shadow-sm border-2 border-dashed border-gray-300 hover:border-red-400 hover:bg-gray-50/60 transition-all text-center relative cursor-pointer group">
+          <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+          <div className="bg-red-50 text-red-600 rounded-2xl p-4 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform flex items-center justify-center">
+            <FileType size={32} />
           </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
-              <div className="bg-red-100 p-3 rounded-lg text-red-600"><FileType size={24} /></div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 truncate">{file.name}</p>
-                <p className="text-sm text-gray-500">{formatSize(file.size)} • {numPages} หน้า</p>
+          <p className="font-semibold text-gray-800 text-base">คลิกเพื่อเลือกไฟล์ PDF (เลือกได้ 1 ไฟล์ หรือหลายไฟล์พร้อมกัน)</p>
+          <p className="text-xs text-gray-500 mt-1">ตั้งเป้าขนาดไฟล์ไม่เกิน X MB • โหมดขาว-ดำประหยัดพื้นที่ • ดูภาพเปรียบเทียบความชัดก่อนโหลด</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left: Compression Settings (5 cols) */}
+          <div className="lg:col-span-5 bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-5">
+            {/* Selected Files Info */}
+            <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 flex items-center gap-3">
+              <div className="bg-red-100 p-2 rounded-lg text-red-600 shrink-0"><FileType size={20} /></div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-gray-900 text-sm truncate">
+                  {isBatch ? `เลือกแล้ว ${files.length} ไฟล์ PDF` : primaryFile.name}
+                </p>
+                <p className="text-xs text-gray-500">
+                  ขนาดรวม {formatSize(files.reduce((acc, f) => acc + f.size, 0))}
+                  {!isBatch && numPages > 0 ? ` • ${numPages} หน้า` : ''}
+                </p>
               </div>
-              <button onClick={() => setFile(null)} className="text-gray-400 hover:text-red-500"><X size={20} /></button>
             </div>
 
-            {!processedPdf ? (
-              <div className="space-y-3">
-                <button onClick={processPdf} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-red-200 flex justify-center items-center gap-2">
-                  {isProcessing ? <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>{statusMsg} ({progress}%)</span></> : <><Zap size={20} /><span>เริ่มบีบอัด</span></>}
-                </button>
-                <p className="text-xs text-gray-400 text-center">เมื่อบีบอัดแล้วข้อความจะไม่สามารถค้นหาได้</p>
+            {/* Preset Modes */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-gray-700">เลือกรูปแบบการบีบอัด</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'balanced', title: 'สมดุล (แนะนำ)', desc: 'เล็กและยังอ่านชัด' },
+                  { id: 'extreme', title: 'บีบสูงสุด', desc: 'ไฟล์เล็กสุด ส่งเว็บไว' },
+                  { id: 'high', title: 'เน้นคมชัด', desc: 'เหมาะสำหรับสั่งพิมพ์' },
+                  { id: 'target', title: 'จำกัดขนาด (MB)', desc: 'ตั้งเป้าห้ามเกิน X MB' },
+                  { id: 'lossless', title: 'คงตัวหนังสือ', desc: 'Copy/Search ข้อความได้' },
+                  { id: 'custom', title: 'ปรับเอง', desc: 'เลื่อนคุณภาพ 10-100%' }
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => { setPreset(m.id); setResults([]); }}
+                    className={`p-2.5 rounded-xl border-2 text-left transition-all ${
+                      preset === m.id
+                        ? 'border-red-500 bg-red-50/70 text-red-800'
+                        : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">{m.title}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">{m.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-gray-700">ระดับคุณภาพ: {qualityLevel}%</label>
-                    <span className="text-xs text-gray-500">
-                      ประมาณ: ~{formatSize(numPages * 150000 * (qualityLevel / 100))}
-                    </span>
-                  </div>
+            {/* Target Size Input */}
+            {preset === 'target' && (
+              <div className="p-3.5 bg-red-50/60 border border-red-100 rounded-xl space-y-2.5 animate-fade-in">
+                <label className="block text-xs font-bold text-red-900">ขนาดไฟล์เป้าหมายสูงสุด (MB)</label>
+                <div className="flex items-center gap-2">
                   <input
-                    type="range"
-                    min="10"
+                    type="number"
+                    min="0.2"
                     max="100"
-                    step="5"
-                    value={qualityLevel}
-                    onChange={(e) => setQualityLevel(Number(e.target.value))}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-600"
+                    step="0.5"
+                    value={targetSizeMB}
+                    onChange={(e) => setTargetSizeMB(e.target.value)}
+                    className="w-24 p-2 rounded-lg border border-red-200 bg-white font-bold font-mono text-sm text-red-700 outline-none"
                   />
-                  <div className="flex justify-between text-xs text-gray-400">
-                    <span>เล็ก (10%)</span>
-                    <span>ชัดมาก (100%)</span>
+                  <span className="text-xs font-semibold text-red-800">MB</span>
+                  <div className="flex gap-1 ml-auto">
+                    {[1, 2, 5, 10].map((mb) => (
+                      <button
+                        key={mb}
+                        type="button"
+                        onClick={() => setTargetSizeMB(mb)}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${
+                          Number(targetSizeMB) === mb ? 'bg-red-600 text-white border-red-600' : 'bg-white border-red-200 text-red-700'
+                        }`}
+                      >
+                        {mb}MB
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4 animate-fade-in">
-                <div className="p-4 bg-green-50 border border-green-100 rounded-xl flex flex-col gap-1 text-green-700">
-                  <div className="flex items-center gap-2 font-bold"><Check size={20} /> <span>เรียบร้อย!</span></div>
-                  <div className="text-sm ml-7">ขนาดใหม่: {formatSize(processedPdf.size)} <span className="bg-green-200 px-2 rounded-full">-{Math.round(((file.size - processedPdf.size) / file.size) * 100)}%</span></div>
+            )}
+
+            {/* Custom Slider */}
+            {preset === 'custom' && (
+              <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 space-y-2 animate-fade-in">
+                <div className="flex justify-between text-xs font-semibold text-gray-700">
+                  <span>ระดับคุณภาพภาพ</span>
+                  <span className="font-mono text-red-600">{qualityLevel}%</span>
                 </div>
-                <a href={processedPdf.url} download={`optimized-${file.name}`} className="w-full bg-gray-900 text-white font-medium py-3 rounded-xl hover:bg-gray-800 transition-all flex justify-center items-center gap-2">
-                  <Download size={20} /> ดาวน์โหลดไฟล์ใหม่
-                </a>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={qualityLevel}
+                  onChange={(e) => setQualityLevel(Number(e.target.value))}
+                  className="w-full accent-red-600"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400">
+                  <span>เล็กมาก (10%)</span>
+                  <span>ชัดมาก (100%)</span>
+                </div>
+              </div>
+            )}
+
+            {/* Grayscale Toggle */}
+            {preset !== 'lossless' && (
+              <label className="flex items-center justify-between p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer">
+                <div>
+                  <div className="text-xs font-semibold text-gray-800">โหมดเอกสารขาว-ดำ (Grayscale)</div>
+                  <div className="text-[11px] text-gray-500">ลดขนาดไฟล์ลงได้อีก 30–50% เหมาะกับเอกสารสแกน</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isGrayscale}
+                  onChange={(e) => { setIsGrayscale(e.target.checked); setResults([]); }}
+                  className="rounded accent-red-600 w-4 h-4 shrink-0"
+                />
+              </label>
+            )}
+
+            {/* Action Button & Progress */}
+            {isProcessing && (
+              <div className="space-y-1.5">
+                <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-600 transition-all duration-200" style={{ width: `${progress}%` }} />
+                </div>
+                <p className="text-xs text-center text-red-600 font-medium">{statusMsg} ({progress}%)</p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={processPdfs}
+              disabled={isProcessing}
+              className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl transition-all shadow-lg shadow-red-100 flex justify-center items-center gap-2"
+            >
+              {isProcessing ? (
+                <><span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span><span>กำลังบีบอัด...</span></>
+              ) : (
+                <><Zap size={19} /><span>{isBatch ? `เริ่มบีบอัดทั้งหมด (${files.length} ไฟล์)` : 'เริ่มบีบอัด PDF'}</span></>
+              )}
+            </button>
+
+            {/* Download Results */}
+            {results.length > 0 && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between text-emerald-800 font-bold text-sm">
+                  <span className="flex items-center gap-1.5"><Check size={18} /> บีบอัดเรียบร้อย!</span>
+                  {!isBatch && results[0] && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-mono">
+                      {results[0].newSize <= results[0].originalSize ? '-' : '+'}
+                      {Math.abs(Math.round(((results[0].originalSize - results[0].newSize) / results[0].originalSize) * 100))}%
+                    </span>
+                  )}
+                </div>
+
+                {!isBatch && results[0] ? (
+                  <>
+                    <div className="text-xs text-emerald-800 flex justify-between">
+                      <span>ต้นฉบับ: {formatSize(results[0].originalSize)}</span>
+                      <span className="font-bold">ขนาดใหม่: {formatSize(results[0].newSize)}</span>
+                    </div>
+                    <a
+                      href={results[0].url}
+                      download={results[0].outName}
+                      className="w-full bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3 rounded-xl transition-all flex justify-center items-center gap-2 text-sm"
+                    >
+                      <Download size={18} /> ดาวน์โหลดไฟล์ PDF ใหม่
+                    </a>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    {zipUrl && (
+                      <a
+                        href={zipUrl}
+                        download={`compressed-pdfs-${new Date().toISOString().slice(0, 10)}.zip`}
+                        className="w-full bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3 rounded-xl transition-all flex justify-center items-center gap-2 text-sm"
+                      >
+                        <Download size={18} /> ดาวน์โหลดทั้งหมด ({results.length} ไฟล์ ZIP)
+                      </a>
+                    )}
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pt-1">
+                      {results.map((r, idx) => (
+                        <a
+                          key={idx}
+                          href={r.url}
+                          download={r.outName}
+                          className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-emerald-100 text-xs text-gray-800 hover:border-emerald-400"
+                        >
+                          <span className="truncate flex-1 mr-2">{r.name}</span>
+                          <span className="font-mono text-[11px] text-emerald-700 shrink-0">
+                            {formatSize(r.originalSize)} → {formatSize(r.newSize)}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
+
+          {/* Right: Before / After Quality Preview (7 cols) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-3.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between text-xs">
+              <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+                <Eye size={15} className="text-red-600" />
+                {isBatch ? `รายการไฟล์ทั้งหมด (${files.length} ไฟล์)` : 'เปรียบเทียบความชัดหน้าแรก (ก่อน – หลังบีบอัด)'}
+              </span>
+              {!isBatch && estimatedNewSize && (
+                <span className="font-mono font-semibold text-indigo-600">
+                  ขนาดใหม่ประมาณ ~{formatSize(estimatedNewSize)}
+                </span>
+              )}
+            </div>
+
+            {isBatch ? (
+              <div className="p-4 divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
+                {files.map((f, idx) => (
+                  <div key={idx} className="py-2.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileType size={16} className="text-red-500 shrink-0" />
+                      <span className="truncate font-medium text-gray-700">{f.name}</span>
+                    </div>
+                    <span className="font-mono text-gray-500 shrink-0 ml-3">{formatSize(f.size)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-100/70 min-h-[420px]">
+                <div className="space-y-2 flex flex-col">
+                  <div className="text-xs font-semibold text-gray-600 text-center">
+                    ต้นฉบับ ({formatSize(primaryFile.size)})
+                  </div>
+                  <div className="flex-1 bg-white rounded-xl border border-gray-200 p-2 flex items-center justify-center overflow-hidden min-h-[340px]">
+                    {beforePreview ? (
+                      <img src={beforePreview} alt="Original Page 1" className="max-h-[420px] w-auto object-contain" />
+                    ) : (
+                      <span className="text-xs text-gray-400">กำลังโหลดตัวอย่าง...</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 flex flex-col">
+                  <div className="text-xs font-semibold text-red-600 text-center flex items-center justify-center gap-1.5">
+                    <span>หลังบีบอัด ({preset === 'lossless' ? 'คงข้อความเดิม' : isGrayscale ? 'ขาว-ดำ' : 'สี'})</span>
+                    {previewLoading && <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />}
+                  </div>
+                  <div className="flex-1 bg-white rounded-xl border border-gray-200 p-2 flex items-center justify-center overflow-hidden min-h-[340px]">
+                    {afterPreview ? (
+                      <img src={afterPreview} alt="Compressed Page 1" className="max-h-[420px] w-auto object-contain" />
+                    ) : (
+                      <span className="text-xs text-gray-400">กำลังจำลองผลลัพธ์...</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
