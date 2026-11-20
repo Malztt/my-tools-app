@@ -1,0 +1,37 @@
+name: Build Windows Desktop App (Electron Backup)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-electron:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Stamp build version (1.0.<run_number>)
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows Electron Portable .exe
+        run: npm run electron:build
+
+      - name: Upload Electron Portable .exe Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkTools-Windows-Electron-Backup-EXE
+          path: |
+            release/*Portable.exe
+          if-no-files-found: error

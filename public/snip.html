@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>Snipping Overlay</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000;
+      cursor: crosshair;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #screen-img {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: fill;
+      pointer-events: none;
+      z-index: 1;
+    }
+    #dim-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.48);
+      z-index: 2;
+      pointer-events: none;
+    }
+    #selection-box {
+      position: fixed;
+      display: none;
+      border: 2px solid #6366f1;
+      box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.52), 0 0 12px rgba(99, 102, 241, 0.6);
+      z-index: 3;
+      pointer-events: none;
+    }
+    .handle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #ffffff;
+      border: 2px solid #4f46e5;
+      border-radius: 2px;
+    }
+    .handle.tl { top: -5px; left: -5px; }
+    .handle.tr { top: -5px; right: -5px; }
+    .handle.bl { bottom: -5px; left: -5px; }
+    .handle.br { bottom: -5px; right: -5px; }
+    #size-badge {
+      position: fixed;
+      display: none;
+      background: #1e1b4b;
+      color: #e0e7ff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 9px;
+      border-radius: 6px;
+      border: 1px solid #4f46e5;
+      z-index: 4;
+      pointer-events: none;
+      font-family: Consolas, monospace;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    }
+    #top-hint {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.88);
+      color: #f8fafc;
+      padding: 10px 20px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid rgba(99, 102, 241, 0.45);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45);
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+      backdrop-filter: blur(8px);
+    }
+    #top-hint kbd {
+      background: #334155;
+      color: #e2e8f0;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 11px;
+      border: 1px solid #475569;
+    }
+  </style>
+</head>
+<body>
+  <img id="screen-img" alt="" />
+  <div id="dim-overlay"></div>
+  <div id="selection-box">
+    <div class="handle tl"></div>
+    <div class="handle tr"></div>
+    <div class="handle bl"></div>
+    <div class="handle br"></div>
+  </div>
+  <div id="size-badge">0 × 0 px</div>
+  <div id="top-hint">
+    <span>✂️ ลากเมาส์คลุมพื้นที่หน้าจอที่ต้องการดึงข้อความ (AI OCR)</span>
+    <span>•</span>
+    <span>คลิกขวา หรือกด <kbd>Esc</kbd> เพื่อยกเลิก</span>
+  </div>
+
+  <script>
+    const screenImg = document.getElementById('screen-img');
+    const dimOverlay = document.getElementById('dim-overlay');
+    const selectionBox = document.getElementById('selection-box');
+    const sizeBadge = document.getElementById('size-badge');
+    const topHint = document.getElementById('top-hint');
+
+    let fullDataUrl = null;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let rect = { x: 0, y: 0, w: 0, h: 0 };
+
+    function invokeTauri(cmd, args = {}) {
+      if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function') {
+        return window.__TAURI_INTERNALS__.invoke(cmd, args);
+      }
+      if (window.__TAURI__?.core?.invoke) {
+        return window.__TAURI__.core.invoke(cmd, args);
+      }
+      return Promise.resolve(null);
+    }
+
+    // Pull screenshot immediately from Rust state
+    invokeTauri('get_pending_snip_screen').then((dataUrl) => {
+      if (dataUrl) {
+        fullDataUrl = dataUrl;
+        screenImg.src = dataUrl;
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        invokeTauri('cancel_snip');
+      }
+    });
+
+    window.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      invokeTauri('cancel_snip');
+    });
+
+    window.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || !fullDataUrl) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      rect = { x: startX, y: startY, w: 0, h: 0 };
+
+      dimOverlay.style.display = 'none';
+      selectionBox.style.display = 'block';
+      sizeBadge.style.display = 'block';
+      topHint.style.opacity = '0.35';
+      updateBoxUI();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const curX = e.clientX;
+      const curY = e.clientY;
+      rect.x = Math.min(startX, curX);
+      rect.y = Math.min(startY, curY);
+      rect.w = Math.abs(curX - startX);
+      rect.h = Math.abs(curY - startY);
+      updateBoxUI();
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (!isDragging || e.button !== 0) return;
+      isDragging = false;
+
+      if (rect.w < 12 || rect.h < 12) {
+        selectionBox.style.display = 'none';
+        sizeBadge.style.display = 'none';
+        dimOverlay.style.display = 'block';
+        topHint.style.opacity = '1';
+        return;
+      }
+
+      const natW = screenImg.naturalWidth || window.innerWidth;
+      const natH = screenImg.naturalHeight || window.innerHeight;
+      const scaleX = natW / window.innerWidth;
+      const scaleY = natH / window.innerHeight;
+
+      const sx = Math.max(0, Math.round(rect.x * scaleX));
+      const sy = Math.max(0, Math.round(rect.y * scaleY));
+      const sw = Math.min(natW - sx, Math.max(1, Math.round(rect.w * scaleX)));
+      const sh = Math.min(natH - sy, Math.max(1, Math.round(rect.h * scaleY)));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(screenImg, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      const croppedDataUrl = canvas.toDataURL('image/png');
+      invokeTauri('complete_snip', {
+        payload: {
+          croppedDataUrl,
+          fullDataUrl,
+          pixelSize: { w: sw, h: sh },
+          normalizedRect: {
+            x: rect.x / window.innerWidth,
+            y: rect.y / window.innerHeight,
+            w: rect.w / window.innerWidth,
+            h: rect.h / window.innerHeight
+          }
+        }
+      });
+    });
+
+    function updateBoxUI() {
+      selectionBox.style.left = rect.x + 'px';
+      selectionBox.style.top = rect.y + 'px';
+      selectionBox.style.width = rect.w + 'px';
+      selectionBox.style.height = rect.h + 'px';
+
+      const natW = screenImg.naturalWidth || window.innerWidth;
+      const scale = natW / window.innerWidth;
+      const pw = Math.round(rect.w * scale);
+      const ph = Math.round(rect.h * scale);
+      sizeBadge.textContent = `${pw} × ${ph} px`;
+
+      const badgeTop = rect.y + rect.h + 10 > window.innerHeight - 36
+        ? Math.max(8, rect.y - 32)
+        : rect.y + rect.h + 8;
+      sizeBadge.style.left = Math.min(window.innerWidth - 110, Math.max(8, rect.x)) + 'px';
+      sizeBadge.style.top = badgeTop + 'px';
+    }
+  </script>
+</body>
+</html>
