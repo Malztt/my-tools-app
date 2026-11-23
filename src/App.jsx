@@ -1939,6 +1939,29 @@ const QRCodeGenerator = () => {
   const [frameText, setFrameText] = useState('สแกนที่นี่');
   const [frameColor, setFrameColor] = useState('#111d47');
   const [frameTextColor, setFrameTextColor] = useState('#ffffff');
+  const [frameFont, setFrameFont] = useState('sarabun'); // sarabun, modern, tahoma
+
+  const frameFontConfig = {
+    sarabun: {
+      label: 'TH Sarabun (ทางการ)',
+      cssFamily: '"THSarabunPSK", sans-serif',
+      canvasScale: 1.32,
+      previewClass: 'text-xl leading-snug',
+    },
+    modern: {
+      label: 'โมเดิร์น (Segoe UI)',
+      cssFamily: '"Segoe UI", system-ui, -apple-system, sans-serif',
+      canvasScale: 1.0,
+      previewClass: 'text-sm tracking-wide',
+    },
+    tahoma: {
+      label: 'Tahoma (อ่านง่าย)',
+      cssFamily: 'Tahoma, "Segoe UI", sans-serif',
+      canvasScale: 0.96,
+      previewClass: 'text-sm tracking-wide',
+    },
+  };
+  const activeFrameFont = frameFontConfig[frameFont] || frameFontConfig.sarabun;
 
   const ref = useRef(null);
 
@@ -2258,8 +2281,15 @@ const QRCodeGenerator = () => {
       canvas.height = totalH;
 
       const cardBg = transparentBg ? '#ffffff' : bgColor;
-      const fontSize = Math.round(targetSize * 0.068);
-      ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, "THSarabunPSK", sans-serif`;
+      const fontSize = Math.round(targetSize * 0.068 * activeFrameFont.canvasScale);
+      if (frameFont === 'sarabun' && document.fonts?.load) {
+        try {
+          await document.fonts.load(`700 ${fontSize}px "THSarabunPSK"`);
+        } catch {
+          // continue even if font load throws
+        }
+      }
+      ctx.font = `700 ${fontSize}px ${activeFrameFont.cssFamily}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
@@ -3095,6 +3125,27 @@ const QRCodeGenerator = () => {
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">รูปแบบฟอนต์ข้อความกำกับ</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {Object.entries(frameFontConfig).map(([key, cfg]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setFrameFont(key)}
+                            className={`py-2 px-2.5 rounded-xl border-2 text-xs font-semibold transition-all text-center ${
+                              frameFont === key
+                                ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                            style={{ fontFamily: cfg.cssFamily }}
+                          >
+                            {cfg.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <span className="text-xs text-gray-500 block mb-1">สีกรอบ / แถบสี</span>
@@ -3141,8 +3192,8 @@ const QRCodeGenerator = () => {
               >
                 {frameStyle === 'top_banner' && (
                   <div
-                    className="py-2.5 px-4 text-center font-bold text-sm tracking-wide"
-                    style={{ backgroundColor: frameColor, color: frameTextColor }}
+                    className={`py-2 px-4 text-center font-bold ${activeFrameFont.previewClass}`}
+                    style={{ backgroundColor: frameColor, color: frameTextColor, fontFamily: activeFrameFont.cssFamily }}
                   >
                     {frameText || 'สแกนที่นี่'}
                   </div>
@@ -3154,8 +3205,8 @@ const QRCodeGenerator = () => {
 
                 {frameStyle === 'card' && (
                   <div
-                    className="pb-3 px-4 text-center font-bold text-sm"
-                    style={{ color: frameColor }}
+                    className={`pb-3 px-4 text-center font-bold ${activeFrameFont.previewClass}`}
+                    style={{ color: frameColor, fontFamily: activeFrameFont.cssFamily }}
                   >
                     {frameText || 'สแกนที่นี่'}
                   </div>
@@ -3163,8 +3214,8 @@ const QRCodeGenerator = () => {
 
                 {frameStyle === 'banner' && (
                   <div
-                    className="py-2.5 px-4 text-center font-bold text-sm tracking-wide"
-                    style={{ backgroundColor: frameColor, color: frameTextColor }}
+                    className={`py-2 px-4 text-center font-bold ${activeFrameFont.previewClass}`}
+                    style={{ backgroundColor: frameColor, color: frameTextColor, fontFamily: activeFrameFont.cssFamily }}
                   >
                     {frameText || 'สแกนที่นี่'}
                   </div>
@@ -7769,42 +7820,87 @@ const App = () => {
   const [updatingProgress, setUpdatingProgress] = useState(null); // { percent, status }
   const [updateStatusMsg, setUpdateStatusMsg] = useState('');
 
+  const isNewerVersion = (latest, current) => {
+    const parse = (v) =>
+      String(v || '')
+        .trim()
+        .replace(/^v/i, '')
+        .split('.')
+        .map((n) => parseInt(n, 10) || 0);
+    const a = parse(latest);
+    const b = parse(current);
+    const len = Math.max(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+      const va = a[i] || 0;
+      const vb = b[i] || 0;
+      if (va > vb) return true;
+      if (va < vb) return false;
+    }
+    return false;
+  };
+
   const handleCheckUpdate = async (silent = false) => {
     if (!silent) {
       setCheckingUpdate(true);
       setUpdateStatusMsg('');
     }
     try {
+      let currentVer = appVersion;
       if (isElectron && window.electronAPI?.checkForUpdates) {
         const res = await window.electronAPI.checkForUpdates();
-        if (res?.currentVersion) setAppVersion(res.currentVersion);
-        if (res?.hasUpdate) {
-          setUpdateInfo(res);
-          setUpdateStatusMsg(`พบเวอร์ชันใหม่ v${res.latestVersion}`);
+        if (res?.currentVersion) {
+          currentVer = res.currentVersion;
+          setAppVersion(res.currentVersion);
+        }
+        if (res?.success) {
+          if (res.hasUpdate) {
+            setUpdateInfo(res);
+            setUpdateStatusMsg(`พบเวอร์ชันใหม่ v${res.latestVersion}`);
+          } else if (!silent) {
+            setUpdateInfo(null);
+            setUpdateStatusMsg(`เป็นเวอร์ชันล่าสุดแล้ว (v${currentVer})`);
+            setTimeout(() => setUpdateStatusMsg(''), 3500);
+          }
+          return;
+        }
+        // If Rust reqwest failed (e.g. corporate proxy/TLS), fall through to WebView2 fetch fallback below
+      }
+
+      const response = await fetch('https://api.github.com/repos/Malztt/my-tools-app/releases/latest', {
+        cache: 'no-store',
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const latestVer = String(data.tag_name || '').replace(/^v/i, '');
+        const exeAsset = Array.isArray(data.assets)
+          ? data.assets.find((a) => String(a?.name || '').toLowerCase().endsWith('.exe'))
+          : null;
+        const downloadUrl = exeAsset?.browser_download_url || '';
+
+        if (isElectron && latestVer && isNewerVersion(latestVer, currentVer) && downloadUrl) {
+          setUpdateInfo({
+            success: true,
+            currentVersion: currentVer,
+            latestVersion: latestVer,
+            hasUpdate: true,
+            downloadUrl,
+            releaseUrl: data.html_url || '',
+          });
+          setUpdateStatusMsg(`พบเวอร์ชันใหม่ v${latestVer}`);
         } else if (!silent) {
           setUpdateInfo(null);
-          setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
-          setTimeout(() => setUpdateStatusMsg(''), 3000);
+          setUpdateStatusMsg(
+            latestVer ? `เป็นเวอร์ชันล่าสุดแล้ว (v${latestVer})` : 'เป็นเวอร์ชันล่าสุดแล้ว'
+          );
+          setTimeout(() => setUpdateStatusMsg(''), 3500);
         }
-      } else {
-        // Fallback check via GitHub API on Web
-        const response = await fetch('https://api.github.com/repos/Malztt/my-tools-app/releases/latest');
-        if (response.ok) {
-          const data = await response.json();
-          const latestVer = String(data.tag_name || '').replace(/^v/i, '');
-          if (!silent) {
-            setUpdateStatusMsg(latestVer ? `เวอร์ชันล่าสุด v${latestVer}` : 'เป็นเวอร์ชันล่าสุดแล้ว');
-            setTimeout(() => setUpdateStatusMsg(''), 3000);
-          }
-        } else if (!silent) {
-          setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
-          setTimeout(() => setUpdateStatusMsg(''), 3000);
-        }
+      } else if (!silent) {
+        setUpdateStatusMsg(`เช็กอัปเดตไม่สำเร็จ (HTTP ${response.status})`);
       }
     } catch {
       if (!silent) {
-        setUpdateStatusMsg('เป็นเวอร์ชันล่าสุดแล้ว');
-        setTimeout(() => setUpdateStatusMsg(''), 3000);
+        setUpdateStatusMsg('เชื่อมต่อ GitHub ไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ต');
       }
     } finally {
       if (!silent) setCheckingUpdate(false);

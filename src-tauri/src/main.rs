@@ -316,6 +316,7 @@ async fn check_for_updates(app: AppHandle) -> serde_json::Value {
     match client
         .get(&url)
         .header("Accept", "application/vnd.github+json")
+        .header("Cache-Control", "no-cache")
         .send()
         .await
     {
@@ -352,16 +353,30 @@ async fn check_for_updates(app: AppHandle) -> serde_json::Value {
                     "releaseUrl": json["html_url"].as_str().unwrap_or("")
                 });
             }
+            return serde_json::json!({
+                "success": false,
+                "currentVersion": current_version,
+                "hasUpdate": false,
+                "error": "ไม่สามารถอ่านข้อมูล Release จาก GitHub ได้"
+            });
         }
-        _ => {}
+        Ok(res) => {
+            return serde_json::json!({
+                "success": false,
+                "currentVersion": current_version,
+                "hasUpdate": false,
+                "error": format!("เช็กอัปเดตไม่สำเร็จ (HTTP {})", res.status())
+            });
+        }
+        Err(e) => {
+            return serde_json::json!({
+                "success": false,
+                "currentVersion": current_version,
+                "hasUpdate": false,
+                "error": format!("เชื่อมต่อ GitHub ไม่ได้: {}", e)
+            });
+        }
     }
-
-    serde_json::json!({
-        "success": false,
-        "currentVersion": current_version,
-        "hasUpdate": false,
-        "error": "ยังไม่มี Release ใหม่บน GitHub หรือไม่สามารถเชื่อมต่อได้"
-    })
 }
 
 #[tauri::command]
@@ -444,7 +459,7 @@ async fn download_and_install_update(
     );
 
     let bat_content = format!(
-        "@echo off\r\nchcp 65001 > nul\r\nping 127.0.0.1 -n 3 > nul\r\n:retry\r\ncopy /y \"{}\" \"{}\" > nul 2>&1\r\nif errorlevel 1 (\r\n  ping 127.0.0.1 -n 2 > nul\r\n  goto retry\r\n)\r\ndel /f /q \"{}\" > nul 2>&1\r\nstart \"\" \"{}\"\r\ndel \"%~f0\"\r\n",
+        "@echo off\r\nchcp 65001 > nul\r\nset /a tries=0\r\nping 127.0.0.1 -n 3 > nul\r\n:retry\r\nset /a tries+=1\r\ncopy /y \"{}\" \"{}\" > nul 2>&1\r\nif errorlevel 1 (\r\n  if %tries% GEQ 25 goto done\r\n  ping 127.0.0.1 -n 2 > nul\r\n  goto retry\r\n)\r\ndel /f /q \"{}\" > nul 2>&1\r\nstart \"\" \"{}\"\r\n:done\r\ndel \"%~f0\"\r\n",
         downloaded_tmp_exe.display(),
         target_exe.display(),
         downloaded_tmp_exe.display(),
@@ -459,15 +474,16 @@ async fn download_and_install_update(
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
         let _ = std::process::Command::new("cmd.exe")
             .args(["/c", &updater_bat.to_string_lossy()])
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn();
     }
 
     let handle = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(400));
         handle.exit(0);
     });
 
