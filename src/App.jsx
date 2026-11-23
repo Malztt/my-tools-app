@@ -7983,17 +7983,19 @@ const App = () => {
     },
     {
       id: 'files',
-      label: 'จัดการไฟล์ & ระบบ',
+      label: 'จัดการไฟล์ & โฟลเดอร์',
       items: [
         { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
         { id: 'bulk_folders', label: 'สร้างโฟลเดอร์เป็นชุด', icon: FolderPlus },
         { id: 'duplicate_finder', label: 'ค้นหาไฟล์ซ้ำ', icon: Copy },
-        { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
       ],
     },
   ];
 
-  const tools = toolGroups.flatMap((g) => g.items);
+  const tools = [
+    ...toolGroups.flatMap((g) => g.items),
+    { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
+  ];
 
   const [openGroups, setOpenGroups] = useState(() => {
     try {
@@ -8087,7 +8089,6 @@ const App = () => {
               {toolGroups.map((group) => {
                 const isOpen = Boolean(openGroups[group.id]);
                 const hasActiveItem = group.items.some((i) => i.id === activeTab);
-                const showGroupBadge = group.id === 'files' && !isOpen && unreadDownloads > 0;
 
                 return (
                   <div key={group.id} className="space-y-1">
@@ -8104,17 +8105,10 @@ const App = () => {
                         <span>{group.label}</span>
                         <span className="text-[10px] font-normal text-gray-400">({group.items.length})</span>
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        {showGroupBadge && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-indigo-600 text-white">
-                            {unreadDownloads > 99 ? '99+' : unreadDownloads}
-                          </span>
-                        )}
-                        <ChevronDown
-                          size={15}
-                          className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-                        />
-                      </span>
+                      <ChevronDown
+                        size={15}
+                        className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                      />
                     </button>
 
                     {isOpen && (
@@ -8132,11 +8126,6 @@ const App = () => {
                               <tool.icon size={18} className="shrink-0" />
                               <span className="font-medium text-sm truncate">{tool.label}</span>
                             </span>
-                            {tool.id === 'downloads' && unreadDownloads > 0 && (
-                              <span className="ml-2 px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-600 text-white shrink-0">
-                                {unreadDownloads > 99 ? '99+' : unreadDownloads}
-                              </span>
-                            )}
                           </button>
                         ))}
                       </div>
@@ -8144,6 +8133,29 @@ const App = () => {
                   </div>
                 );
               })}
+
+              {/* Standalone Download History Menu */}
+              <div className="pt-2 mt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('downloads'); setSidebarOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 ${
+                    activeTab === 'downloads'
+                      ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <span className="flex items-center space-x-2.5 min-w-0">
+                    <History size={18} className="shrink-0" />
+                    <span className="font-semibold text-sm truncate">ประวัติดาวน์โหลด</span>
+                  </span>
+                  {unreadDownloads > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-600 text-white shrink-0">
+                      {unreadDownloads > 99 ? '99+' : unreadDownloads}
+                    </span>
+                  )}
+                </button>
+              </div>
             </nav>
           </div>
 
