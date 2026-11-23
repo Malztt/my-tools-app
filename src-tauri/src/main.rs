@@ -917,6 +917,331 @@ fn check_files_exist(paths: Vec<String>) -> std::collections::HashMap<String, bo
     result
 }
 
+#[tauri::command]
+fn select_target_folder(title: Option<String>) -> serde_json::Value {
+    let dialog_title = title.unwrap_or_else(|| "เลือกโฟลเดอร์ปลายทาง".to_string());
+    match rfd::FileDialog::new().set_title(&dialog_title).pick_folder() {
+        Some(dir) => serde_json::json!({
+            "canceled": false,
+            "dirPath": dir.to_string_lossy().to_string()
+        }),
+        None => serde_json::json!({ "canceled": true }),
+    }
+}
+
+fn sanitize_folder_segment(seg: &str) -> String {
+    let cleaned: String = seg
+        .chars()
+        .map(|c| match c {
+            ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            _ => c,
+        })
+        .collect();
+    cleaned.trim().trim_end_matches('.').to_string()
+}
+
+#[tauri::command]
+fn create_bulk_folders(base_dir: String, folder_names: Vec<String>) -> serde_json::Value {
+    let base = PathBuf::from(&base_dir);
+    if !base.exists() || !base.is_dir() {
+        return serde_json::json!({
+            "success": false,
+            "error": "ไม่พบโฟลเดอร์ปลายทางที่เลือก"
+        });
+    }
+
+    let mut created_count: usize = 0;
+    let mut existing_count: usize = 0;
+    let mut failed_count: usize = 0;
+    let mut errors: Vec<String> = Vec::new();
+    let mut created_paths: Vec<String> = Vec::new();
+
+    for raw in folder_names {
+        let parts: Vec<String> = raw
+            .replace('\\', "/")
+            .split('/')
+            .map(sanitize_folder_segment)
+            .filter(|s| !s.is_empty() && s != "." && s != "..")
+            .collect();
+
+        if parts.is_empty() {
+            continue;
+        }
+
+        let mut target = base.clone();
+        for part in &parts {
+            target.push(part);
+        }
+
+        if target.exists() {
+            existing_count += 1;
+            continue;
+        }
+
+        match fs::create_dir_all(&target) {
+            Ok(_) => {
+                created_count += 1;
+                created_paths.push(target.to_string_lossy().to_string());
+            }
+            Err(e) => {
+                failed_count += 1;
+                if errors.len() < 10 {
+                    errors.push(format!("{}: {}", parts.join("/"), e));
+                }
+            }
+        }
+    }
+
+    serde_json::json!({
+        "success": true,
+        "createdCount": created_count,
+        "existingCount": existing_count,
+        "failedCount": failed_count,
+        "createdPaths": created_paths,
+        "errors": errors
+    })
+}
+
+fn collect_files_recursive(dir: &Path, include_subfolders: bool, out: &mut Vec<(PathBuf, u64, u64)>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            if include_subfolders {
+                collect_files_recursive(&path, true, out);
+            }
+        } else if meta.is_file() {
+            let size = meta.len();
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push((path, size, modified_ms));
+        }
+    }
+}
+
+fn hash_file_partial(path: &Path, size: u64) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 16384];
+
+    let n = file.read(&mut buf).ok()?;
+    hasher.update(&buf[..n]);
+
+    if size > 32768 {
+        if file.seek(SeekFrom::End(-16384)).is_ok() {
+            if let Ok(n2) = file.read(&mut buf) {
+                hasher.update(&buf[..n2]);
+            }
+        }
+    }
+
+    let digest = hasher.finalize();
+    Some(digest.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+fn hash_file_full(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    Some(digest.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+#[tauri::command]
+async fn scan_duplicate_files(
+    root_dir: String,
+    include_subfolders: bool,
+    min_size_bytes: u64,
+) -> serde_json::Value {
+    let task_res = tokio::task::spawn_blocking(move || {
+        use std::collections::HashMap;
+        use std::time::Instant;
+
+        let start = Instant::now();
+        let root = PathBuf::from(&root_dir);
+        if !root.exists() || !root.is_dir() {
+            return serde_json::json!({
+                "success": false,
+                "error": "ไม่พบโฟลเดอร์ที่ต้องการสแกน"
+            });
+        }
+
+        let mut all_files: Vec<(PathBuf, u64, u64)> = Vec::new();
+        collect_files_recursive(&root, include_subfolders, &mut all_files);
+
+        let scanned_files = all_files.len();
+        let total_bytes_scanned: u64 = all_files.iter().map(|(_, s, _)| *s).sum();
+
+        // Stage 1: Group by exact file size
+        let mut by_size: HashMap<u64, Vec<(PathBuf, u64, u64)>> = HashMap::new();
+        for item in all_files {
+            if item.1 >= min_size_bytes {
+                by_size.entry(item.1).or_default().push(item);
+            }
+        }
+
+        // Stage 2: Partial hash (first 16KB + last 16KB)
+        let mut by_partial: HashMap<(u64, String), Vec<(PathBuf, u64, u64)>> = HashMap::new();
+        for (size, group) in by_size {
+            if group.len() < 2 {
+                continue;
+            }
+            for (path, s, mtime) in group {
+                if let Some(ph) = hash_file_partial(&path, s) {
+                    by_partial.entry((size, ph)).or_default().push((path, s, mtime));
+                }
+            }
+        }
+
+        // Stage 3: Full SHA-256 hash
+        let mut by_full: HashMap<String, Vec<(PathBuf, u64, u64)>> = HashMap::new();
+        for ((size, partial_hash), group) in by_partial {
+            if group.len() < 2 {
+                continue;
+            }
+            if size <= 32768 {
+                // Partial hash already hashed the entire file
+                by_full.entry(partial_hash).or_default().extend(group);
+            } else {
+                for (path, s, mtime) in group {
+                    if let Some(fh) = hash_file_full(&path) {
+                        by_full.entry(fh).or_default().push((path, s, mtime));
+                    }
+                }
+            }
+        }
+
+        let mut duplicate_groups: Vec<serde_json::Value> = Vec::new();
+        let mut total_wasted_bytes: u64 = 0;
+
+        for (hash, mut group) in by_full {
+            if group.len() < 2 {
+                continue;
+            }
+            group.sort_by_key(|(_, _, mtime)| *mtime);
+            let file_size = group[0].1;
+            let wasted = file_size.saturating_mul((group.len() as u64).saturating_sub(1));
+            total_wasted_bytes = total_wasted_bytes.saturating_add(wasted);
+
+            let files_json: Vec<serde_json::Value> = group
+                .into_iter()
+                .map(|(p, s, mtime)| {
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let dir_path = p
+                        .parent()
+                        .map(|d| d.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "name": name,
+                        "fullPath": p.to_string_lossy().to_string(),
+                        "dirPath": dir_path,
+                        "size": s,
+                        "modifiedMs": mtime
+                    })
+                })
+                .collect();
+
+            duplicate_groups.push(serde_json::json!({
+                "hash": hash,
+                "size": file_size,
+                "wastedBytes": wasted,
+                "files": files_json
+            }));
+        }
+
+        duplicate_groups.sort_by(|a, b| {
+            let wa = a["wastedBytes"].as_u64().unwrap_or(0);
+            let wb = b["wastedBytes"].as_u64().unwrap_or(0);
+            wb.cmp(&wa)
+        });
+
+        serde_json::json!({
+            "success": true,
+            "scannedFiles": scanned_files,
+            "totalBytesScanned": total_bytes_scanned,
+            "duplicateGroups": duplicate_groups,
+            "totalWastedBytes": total_wasted_bytes,
+            "elapsedMs": start.elapsed().as_millis() as u64
+        })
+    })
+    .await;
+
+    match task_res {
+        Ok(val) => val,
+        Err(e) => serde_json::json!({
+            "success": false,
+            "error": format!("เกิดข้อผิดพลาดขณะสแกนไฟล์: {}", e)
+        }),
+    }
+}
+
+#[tauri::command]
+fn delete_files_batch(paths: Vec<String>) -> serde_json::Value {
+    let mut deleted_count: usize = 0;
+    let mut freed_bytes: u64 = 0;
+    let mut failed: Vec<serde_json::Value> = Vec::new();
+
+    for p_str in paths {
+        let p = Path::new(&p_str);
+        if !p.exists() || !p.is_file() {
+            failed.push(serde_json::json!({
+                "path": p_str,
+                "error": "ไม่พบไฟล์หรือไม่ใช่ไฟล์"
+            }));
+            continue;
+        }
+        let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+        match fs::remove_file(p) {
+            Ok(_) => {
+                deleted_count += 1;
+                freed_bytes = freed_bytes.saturating_add(size);
+            }
+            Err(e) => {
+                failed.push(serde_json::json!({
+                    "path": p_str,
+                    "error": e.to_string()
+                }));
+            }
+        }
+    }
+
+    serde_json::json!({
+        "success": true,
+        "deletedCount": deleted_count,
+        "freedBytes": freed_bytes,
+        "failed": failed
+    })
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -949,7 +1274,11 @@ fn main() {
             save_download_file,
             open_file_path,
             show_in_folder,
-            check_files_exist
+            check_files_exist,
+            select_target_folder,
+            create_bulk_folders,
+            scan_duplicate_files,
+            delete_files_batch
         ])
         .run(tauri::generate_context!())
         .expect("error while running WorkTools Tauri application");

@@ -19,6 +19,11 @@ import {
   redownloadSessionItem,
   initGlobalDownloadInterceptor,
 } from './downloadManager';
+import PdfOrganizer from './tools/PdfOrganizer';
+import PdfProtect from './tools/PdfProtect';
+import BulkFolderCreator from './tools/BulkFolderCreator';
+import DuplicateFinder from './tools/DuplicateFinder';
+import BackgroundRemover from './tools/BackgroundRemover';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -36,7 +41,8 @@ import {
   Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
   Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
   RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers,
-  Folder, FolderOpen, ArrowRight, Undo2, History, FileArchive, Clock, CheckCircle2
+  Folder, FolderOpen, FolderPlus, ArrowRight, Undo2, History, FileArchive, Clock, CheckCircle2,
+  Wand2, LayoutGrid
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -7950,11 +7956,16 @@ const App = () => {
     { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType },
     { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
     { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors },
+    { id: 'pdf_organize', label: 'จัดเรียง/หมุน/ลบ PDF', icon: LayoutGrid },
+    { id: 'pdf_protect', label: 'ล็อก/ปลดล็อก PDF', icon: Lock },
     { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
     { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
+    { id: 'bg_remover', label: 'ลบพื้นหลังรูปภาพ', icon: Wand2 },
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
     { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
+    { id: 'bulk_folders', label: 'สร้างโฟลเดอร์เป็นชุด', icon: FolderPlus },
+    { id: 'duplicate_finder', label: 'ค้นหาไฟล์ซ้ำ', icon: Copy },
     { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
   ];
 
@@ -8146,9 +8157,14 @@ const App = () => {
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'pdf_split' && <PdfSplitter />}
+            {activeTab === 'pdf_organize' && <PdfOrganizer />}
+            {activeTab === 'pdf_protect' && <PdfProtect />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
+            {activeTab === 'bg_remover' && <BackgroundRemover />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
             {activeTab === 'bulk_rename' && <BulkRenamer />}
+            {activeTab === 'bulk_folders' && <BulkFolderCreator />}
+            {activeTab === 'duplicate_finder' && <DuplicateFinder />}
             {activeTab === 'downloads' && <DownloadHistory />}
           </div>
         </div>

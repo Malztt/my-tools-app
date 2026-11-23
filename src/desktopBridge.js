@@ -59,6 +59,11 @@
     openFilePath: (filePath) => invoke('open_file_path', { filePath }),
     showInFolder: (filePath) => invoke('show_in_folder', { filePath }),
     checkFilesExist: (paths) => invoke('check_files_exist', { paths }),
+    selectTargetFolder: (title) => invoke('select_target_folder', { title: title || null }),
+    createBulkFolders: (baseDir, folderNames) => invoke('create_bulk_folders', { baseDir, folderNames }),
+    scanDuplicateFiles: (rootDir, includeSubfolders, minSizeBytes) =>
+      invoke('scan_duplicate_files', { rootDir, includeSubfolders, minSizeBytes }),
+    deleteFilesBatch: (paths) => invoke('delete_files_batch', { paths }),
     checkForUpdates: () => invoke('check_for_updates'),
     downloadAndInstallUpdate: (downloadUrl) => invoke('download_and_install_update', { downloadUrl }),
     onUpdateProgress: (callback) => listenEvent('update-progress', callback),
