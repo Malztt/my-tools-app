@@ -644,6 +644,263 @@ fn execute_bulk_rename(operations: Vec<RenameOp>) -> serde_json::Value {
     })
 }
 
+fn resolve_default_download_dir(app: &AppHandle) -> PathBuf {
+    if let Ok(dir) = app.path().download_dir() {
+        return dir;
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(profile).join("Downloads");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = PathBuf::from(home).join("Downloads");
+        if p.exists() {
+            return p;
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let base = Path::new(name)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cleaned: String = base
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            _ => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.');
+    if trimmed.is_empty() {
+        "download".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn unique_target_path(dir: &Path, filename: &str) -> PathBuf {
+    let candidate = dir.join(filename);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(filename);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| filename.to_string());
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+
+    for i in 1..10000 {
+        let next = dir.join(format!("{} ({}){}", stem, i, ext));
+        if !next.exists() {
+            return next;
+        }
+    }
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    dir.join(format!("{}-{}{}", stem, stamp, ext))
+}
+
+#[tauri::command]
+fn get_download_dir(app: AppHandle) -> String {
+    resolve_default_download_dir(&app)
+        .to_string_lossy()
+        .to_string()
+}
+
+#[tauri::command]
+fn choose_download_dir() -> serde_json::Value {
+    match rfd::FileDialog::new()
+        .set_title("เลือกโฟลเดอร์สำหรับบันทึกไฟล์ดาวน์โหลด")
+        .pick_folder()
+    {
+        Some(dir) => serde_json::json!({
+            "canceled": false,
+            "dirPath": dir.to_string_lossy().to_string()
+        }),
+        None => serde_json::json!({ "canceled": true }),
+    }
+}
+
+#[tauri::command]
+fn save_download_file(
+    app: AppHandle,
+    file_name: String,
+    data_base64: String,
+    custom_dir: Option<String>,
+) -> serde_json::Value {
+    let target_dir = custom_dir
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.exists() && p.is_dir())
+        .unwrap_or_else(|| resolve_default_download_dir(&app));
+
+    if !target_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&target_dir) {
+            return serde_json::json!({
+                "success": false,
+                "error": format!("ไม่สามารถสร้างโฟลเดอร์ปลายทางได้: {}", e)
+            });
+        }
+    }
+
+    let safe_name = sanitize_filename(&file_name);
+    let final_path = unique_target_path(&target_dir, &safe_name);
+    let final_name = final_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or(safe_name);
+
+    let b64_payload = match data_base64.split_once(',') {
+        Some((_, b64)) => b64,
+        None => data_base64.as_str(),
+    };
+
+    let bytes = match BASE64.decode(b64_payload.trim()) {
+        Ok(b) => b,
+        Err(e) => {
+            return serde_json::json!({
+                "success": false,
+                "error": format!("แปลงข้อมูลไฟล์ไม่สำเร็จ: {}", e)
+            });
+        }
+    };
+
+    let size = bytes.len();
+    match fs::File::create(&final_path).and_then(|mut f| f.write_all(&bytes)) {
+        Ok(_) => serde_json::json!({
+            "success": true,
+            "filePath": final_path.to_string_lossy().to_string(),
+            "fileName": final_name,
+            "dirPath": target_dir.to_string_lossy().to_string(),
+            "size": size
+        }),
+        Err(e) => serde_json::json!({
+            "success": false,
+            "error": format!("บันทึกไฟล์ไม่สำเร็จ: {}", e)
+        }),
+    }
+}
+
+#[tauri::command]
+fn open_file_path(file_path: String) -> serde_json::Value {
+    let p = Path::new(&file_path);
+    if !p.exists() {
+        return serde_json::json!({
+            "success": false,
+            "error": "ไม่พบไฟล์ในตำแหน่งเดิม (อาจถูกย้ายหรือลบไปแล้ว)"
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let res = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &file_path])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+        return match res {
+            Ok(_) => serde_json::json!({ "success": true }),
+            Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดไฟล์ไม่สำเร็จ: {}", e) }),
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let res = std::process::Command::new("open").arg(&file_path).spawn();
+        return match res {
+            Ok(_) => serde_json::json!({ "success": true }),
+            Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดไฟล์ไม่สำเร็จ: {}", e) }),
+        };
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let res = std::process::Command::new("xdg-open").arg(&file_path).spawn();
+        match res {
+            Ok(_) => serde_json::json!({ "success": true }),
+            Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดไฟล์ไม่สำเร็จ: {}", e) }),
+        }
+    }
+}
+
+#[tauri::command]
+fn show_in_folder(file_path: String) -> serde_json::Value {
+    let p = Path::new(&file_path);
+
+    #[cfg(target_os = "windows")]
+    {
+        if p.exists() && p.is_file() {
+            let arg = format!("/select,{}", file_path);
+            let res = std::process::Command::new("explorer").arg(arg).spawn();
+            return match res {
+                Ok(_) => serde_json::json!({ "success": true }),
+                Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดโฟลเดอร์ไม่สำเร็จ: {}", e) }),
+            };
+        } else if p.exists() && p.is_dir() {
+            let res = std::process::Command::new("explorer").arg(&file_path).spawn();
+            return match res {
+                Ok(_) => serde_json::json!({ "success": true }),
+                Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดโฟลเดอร์ไม่สำเร็จ: {}", e) }),
+            };
+        } else if let Some(parent) = p.parent() {
+            if parent.exists() {
+                let res = std::process::Command::new("explorer").arg(parent).spawn();
+                return match res {
+                    Ok(_) => serde_json::json!({ "success": true, "parentOnly": true }),
+                    Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดโฟลเดอร์ไม่สำเร็จ: {}", e) }),
+                };
+            }
+        }
+        return serde_json::json!({
+            "success": false,
+            "error": "ไม่พบไฟล์หรือโฟลเดอร์ดังกล่าวแล้ว"
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let target = if p.is_dir() {
+            p
+        } else {
+            p.parent().unwrap_or(p)
+        };
+        if !target.exists() {
+            return serde_json::json!({
+                "success": false,
+                "error": "ไม่พบไฟล์หรือโฟลเดอร์ดังกล่าวแล้ว"
+            });
+        }
+        let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        match std::process::Command::new(cmd).arg(target).spawn() {
+            Ok(_) => serde_json::json!({ "success": true }),
+            Err(e) => serde_json::json!({ "success": false, "error": format!("เปิดโฟลเดอร์ไม่สำเร็จ: {}", e) }),
+        }
+    }
+}
+
+#[tauri::command]
+fn check_files_exist(paths: Vec<String>) -> std::collections::HashMap<String, bool> {
+    let mut result = std::collections::HashMap::new();
+    for p in paths {
+        let exists = Path::new(&p).exists();
+        result.insert(p, exists);
+    }
+    result
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -670,7 +927,13 @@ fn main() {
             download_and_install_update,
             select_folder_for_rename,
             select_files_for_rename,
-            execute_bulk_rename
+            execute_bulk_rename,
+            get_download_dir,
+            choose_download_dir,
+            save_download_file,
+            open_file_path,
+            show_in_folder,
+            check_files_exist
         ])
         .run(tauri::generate_context!())
         .expect("error while running WorkTools Tauri application");

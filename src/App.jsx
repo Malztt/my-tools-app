@@ -6,7 +6,19 @@ import fontkit from '@pdf-lib/fontkit';
 import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+import {
+  downloadBlob as saveAs,
+  getDownloadHistory,
+  removeDownloadHistoryItem,
+  clearDownloadHistory,
+  getCustomDownloadDir,
+  setCustomDownloadDir,
+  setCurrentDownloadSource,
+  subscribeDownloads,
+  getSessionBlobUrl,
+  redownloadSessionItem,
+  initGlobalDownloadInterceptor,
+} from './downloadManager';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -24,7 +36,7 @@ import {
   Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
   Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
   RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers,
-  Folder, FolderOpen, ArrowRight, Undo2
+  Folder, FolderOpen, ArrowRight, Undo2, History, FileArchive, Clock, CheckCircle2
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -4361,7 +4373,6 @@ const PdfConverter = () => {
   const downloadZip = async () => {
     if (!result || result.type !== 'images') return;
     const JSZip = (await import('jszip')).default;
-    const saveAs = (await import('file-saver')).saveAs;
     const zip = new JSZip();
 
     selectedPages.forEach(index => {
@@ -7281,12 +7292,458 @@ const BulkRenamer = () => {
   );
 };
 
+// 12. Download History Manager
+const DownloadHistory = () => {
+  const isTauriDesktop = typeof window !== 'undefined' && Boolean(window.electronAPI?.saveDownloadFile);
+  const [history, setHistory] = useState(() => getDownloadHistory());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all'); // all, pdf, image, zip, doc
+  const [defaultDir, setDefaultDir] = useState('');
+  const [customDir, setCustomDir] = useState(() => getCustomDownloadDir());
+  const [fileStatusMap, setFileStatusMap] = useState({});
+  const [copiedId, setCopiedId] = useState(null);
+  const [actionMsg, setActionMsg] = useState(null); // { type: 'error'|'info', text }
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const activeSaveDir = customDir || defaultDir;
+
+  const refreshFileExistence = async (items) => {
+    if (!isTauriDesktop || !window.electronAPI?.checkFilesExist) return;
+    const paths = items.map((i) => i.filePath).filter(Boolean);
+    if (paths.length === 0) return;
+    try {
+      const map = await window.electronAPI.checkFilesExist(paths);
+      setFileStatusMap(map || {});
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    const initial = getDownloadHistory();
+    setHistory(initial);
+    refreshFileExistence(initial);
+
+    if (isTauriDesktop && window.electronAPI?.getDownloadDir) {
+      window.electronAPI.getDownloadDir().then((dir) => {
+        if (dir) setDefaultDir(dir);
+      });
+    }
+
+    const unsub = subscribeDownloads((evt) => {
+      if (evt?.history) {
+        setHistory(evt.history);
+        refreshFileExistence(evt.history);
+      }
+    });
+    return unsub;
+  }, [isTauriDesktop]);
+
+  const showTempMsg = (text, type = 'info') => {
+    setActionMsg({ text, type });
+    setTimeout(() => setActionMsg(null), 3500);
+  };
+
+  const handleChooseDir = async () => {
+    if (!window.electronAPI?.chooseDownloadDir) return;
+    const res = await window.electronAPI.chooseDownloadDir();
+    if (!res?.canceled && res?.dirPath) {
+      setCustomDownloadDir(res.dirPath);
+      setCustomDir(res.dirPath);
+      showTempMsg(`เปลี่ยนโฟลเดอร์บันทึกเป็น ${res.dirPath}`);
+    }
+  };
+
+  const handleResetDir = () => {
+    setCustomDownloadDir('');
+    setCustomDir('');
+    showTempMsg('คืนค่าโฟลเดอร์ดาวน์โหลดเป็นค่าเริ่มต้นของระบบแล้ว');
+  };
+
+  const handleOpenFile = async (item) => {
+    if (!item.filePath || !window.electronAPI?.openFilePath) return;
+    const res = await window.electronAPI.openFilePath(item.filePath);
+    if (!res?.success) {
+      showTempMsg(res?.error || 'ไม่สามารถเปิดไฟล์ได้', 'error');
+      refreshFileExistence(history);
+    }
+  };
+
+  const handleShowInFolder = async (targetPath) => {
+    if (!targetPath || !window.electronAPI?.showInFolder) return;
+    const res = await window.electronAPI.showInFolder(targetPath);
+    if (!res?.success) {
+      showTempMsg(res?.error || 'ไม่สามารถเปิดโฟลเดอร์ได้', 'error');
+      refreshFileExistence(history);
+    } else if (res?.parentOnly) {
+      showTempMsg('ไฟล์ต้นฉบับถูกย้ายหรือลบแล้ว จึงเปิดโฟลเดอร์ปลายทางให้แทน');
+    }
+  };
+
+  const handleCopyPath = async (item) => {
+    const text = item.filePath || item.fileName;
+    try {
+      if (window.electronAPI?.copyToClipboard) {
+        await window.electronAPI.copyToClipboard(text);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+      setCopiedId(item.id);
+      setTimeout(() => setCopiedId(null), 1800);
+    } catch {
+      showTempMsg('คัดลอกไม่สำเร็จ', 'error');
+    }
+  };
+
+  const handleRemoveItem = (id) => {
+    const next = removeDownloadHistoryItem(id);
+    setHistory(next);
+  };
+
+  const handleClearAll = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      setTimeout(() => setConfirmClear(false), 4000);
+      return;
+    }
+    clearDownloadHistory();
+    setHistory([]);
+    setConfirmClear(false);
+    showTempMsg('ล้างประวัติดาวน์โหลดทั้งหมดแล้ว (ไฟล์จริงในเครื่องไม่ถูกลบ)');
+  };
+
+  const formatTimeThai = (ts) => {
+    if (!ts) return '';
+    const diffSec = Math.floor((Date.now() - ts) / 1000);
+    if (diffSec < 60) return 'เมื่อสักครู่';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} นาทีที่แล้ว`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} ชั่วโมงที่แล้ว`;
+    try {
+      return new Date(ts).toLocaleString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return new Date(ts).toLocaleString();
+    }
+  };
+
+  const renderFileIcon = (category) => {
+    switch (category) {
+      case 'pdf':
+        return (
+          <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+            <FileType size={20} />
+          </div>
+        );
+      case 'image':
+        return (
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+            <FileImage size={20} />
+          </div>
+        );
+      case 'zip':
+        return (
+          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <FileArchive size={20} />
+          </div>
+        );
+      case 'doc':
+        return (
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <FileSpreadsheet size={20} />
+          </div>
+        );
+      default:
+        return (
+          <div className="w-10 h-10 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center shrink-0">
+            <FileText size={20} />
+          </div>
+        );
+    }
+  };
+
+  const filteredHistory = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return history.filter((item) => {
+      if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
+      if (!q) return true;
+      return (
+        String(item.fileName || '').toLowerCase().includes(q) ||
+        String(item.sourceTool || '').toLowerCase().includes(q) ||
+        String(item.filePath || '').toLowerCase().includes(q)
+      );
+    });
+  }, [history, searchQuery, categoryFilter]);
+
+  const filterTabs = [
+    { id: 'all', label: 'ทั้งหมด' },
+    { id: 'pdf', label: 'PDF' },
+    { id: 'image', label: 'รูปภาพ' },
+    { id: 'zip', label: 'ZIP' },
+    { id: 'doc', label: 'ข้อความ / Excel' },
+  ];
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2.5">
+            <History className="text-indigo-600" size={26} />
+            <span>ประวัติดาวน์โหลด</span>
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            รวมรายการไฟล์ที่ดาวน์โหลดจากทุกเครื่องมือใน WorkTools เปิดไฟล์หรือเปิดโฟลเดอร์ปลายทางได้ทันที
+          </p>
+        </div>
+
+        {history.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 self-start sm:self-auto ${
+              confirmClear
+                ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
+            }`}
+          >
+            <Trash2 size={14} />
+            <span>{confirmClear ? 'คลิกอีกครั้งเพื่อยืนยันล้างประวัติ' : 'ล้างประวัติทั้งหมด'}</span>
+          </button>
+        )}
+      </div>
+
+      {/* Desktop Save Folder Bar */}
+      {isTauriDesktop && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+              <FolderOpen size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-gray-500">โฟลเดอร์เก็บไฟล์ดาวน์โหลดปัจจุบัน</div>
+              <div className="text-sm font-mono text-gray-800 truncate mt-0.5" title={activeSaveDir}>
+                {activeSaveDir || 'กำลังตรวจสอบ...'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {activeSaveDir && (
+              <button
+                type="button"
+                onClick={() => handleShowInFolder(activeSaveDir)}
+                className="px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              >
+                <FolderOpen size={14} />
+                <span>เปิดโฟลเดอร์</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleChooseDir}
+              className="px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold transition-all"
+            >
+              เปลี่ยนโฟลเดอร์
+            </button>
+            {customDir && (
+              <button
+                type="button"
+                onClick={handleResetDir}
+                className="px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 text-xs font-medium flex items-center gap-1 transition-all"
+                title="กลับไปใช้โฟลเดอร์ Downloads เริ่มต้น"
+              >
+                <RotateCcw size={13} />
+                <span>ค่าเริ่มต้น</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {actionMsg && (
+        <div
+          className={`px-4 py-3 rounded-xl text-xs font-medium flex items-center gap-2 border ${
+            actionMsg.type === 'error'
+              ? 'bg-red-50 text-red-700 border-red-200'
+              : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+          }`}
+        >
+          <AlertCircle size={15} className="shrink-0" />
+          <span>{actionMsg.text}</span>
+        </div>
+      )}
+
+      {/* Search & Category Filters */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="ค้นหาชื่อไฟล์ หรือชื่อเครื่องมือ..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {filterTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setCategoryFilter(tab.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  categoryFilter === tab.id
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* History List */}
+      {filteredHistory.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-12 text-center space-y-3">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center mx-auto">
+            <Download size={28} />
+          </div>
+          <h3 className="font-semibold text-gray-800">
+            {history.length === 0 ? 'ยังไม่มีประวัติดาวน์โหลด' : 'ไม่พบรายการที่ตรงกับคำค้นหา'}
+          </h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto">
+            {history.length === 0
+              ? 'เมื่อคุณดาวน์โหลดไฟล์ PDF, รูปภาพ, QR Code หรือไฟล์ ZIP จากเครื่องมือใดก็ตาม รายการจะมาปรากฏที่นี่พร้อมแจ้งเตือนและปุ่มเปิดไฟล์ทันที'
+              : 'ลองล้างคำค้นหาหรือเปลี่ยนหมวดหมู่ตัวกรองดูครับ'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filteredHistory.map((item) => {
+            const existsKnown = item.filePath && Object.prototype.hasOwnProperty.call(fileStatusMap, item.filePath);
+            const fileMissing = existsKnown && fileStatusMap[item.filePath] === false;
+            const hasSessionBlob = Boolean(getSessionBlobUrl(item.id));
+
+            return (
+              <div
+                key={item.id}
+                className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm hover:border-indigo-200 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                  {renderFileIcon(item.category)}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-gray-900 truncate max-w-full" title={item.fileName}>
+                        {item.fileName}
+                      </span>
+                      {item.sourceTool && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-medium shrink-0">
+                          {item.sourceTool}
+                        </span>
+                      )}
+                      {fileMissing && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-medium shrink-0">
+                          ไม่พบไฟล์ (อาจถูกย้าย/ลบแล้ว)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 mt-1">
+                      <span className="font-mono">{formatSize(item.size || 0)}</span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        {formatTimeThai(item.timestamp)}
+                      </span>
+                    </div>
+
+                    {item.filePath && (
+                      <div className="text-[11px] font-mono text-gray-400 truncate mt-1" title={item.filePath}>
+                        {item.filePath}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row Actions */}
+                <div className="flex items-center flex-wrap gap-1.5 shrink-0 pl-13 sm:pl-0">
+                  {isTauriDesktop && item.filePath && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenFile(item)}
+                        disabled={fileMissing}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <ExternalLink size={13} />
+                        <span>เปิดไฟล์</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleShowInFolder(item.filePath)}
+                        className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                      >
+                        <FolderOpen size={13} />
+                        <span>เปิดโฟลเดอร์</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPath(item)}
+                        title="คัดลอกที่อยู่ไฟล์"
+                        className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-100 text-gray-600 transition-all"
+                      >
+                        {copiedId === item.id ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                      </button>
+                    </>
+                  )}
+
+                  {!isTauriDesktop && hasSessionBlob && (
+                    <button
+                      type="button"
+                      onClick={() => redownloadSessionItem(item)}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+                    >
+                      <Download size={13} />
+                      <span>ดาวน์โหลดซ้ำ</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveItem(item.id)}
+                    title="ลบออกจากประวัติ"
+                    className="p-1.5 rounded-lg border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-400 transition-all"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Main Layout ---
 const App = () => {
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+  const isTauriDesktop = typeof window !== 'undefined' && Boolean(window.electronAPI?.saveDownloadFile);
   const [activeTab, setActiveTab] = useState('ocr');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingSnip, setPendingSnip] = useState(null);
+
+  // Download Toast & Unread Counter
+  const [downloadToast, setDownloadToast] = useState(null);
+  const [unreadDownloads, setUnreadDownloads] = useState(0);
+  const toastTimerRef = useRef(null);
 
   // Dark / Light Mode state
   const [darkMode, setDarkMode] = useState(() => {
@@ -7402,7 +7859,38 @@ const App = () => {
     { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
     { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
     { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
+    { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
   ];
+
+  // Global download interceptor & toast notification
+  useEffect(() => {
+    initGlobalDownloadInterceptor();
+    const unsub = subscribeDownloads((evt) => {
+      if (evt?.type === 'downloaded' && evt.item) {
+        setDownloadToast(evt.item);
+        setUnreadDownloads((prev) => prev + 1);
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => {
+          setDownloadToast(null);
+        }, 9000);
+      }
+    });
+    return () => {
+      unsub();
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  // Track active tool label for download history tagging & clear unread badge on opening Downloads tab
+  useEffect(() => {
+    const found = tools.find((t) => t.id === activeTab);
+    if (found && found.id !== 'downloads') {
+      setCurrentDownloadSource(found.label);
+    }
+    if (activeTab === 'downloads') {
+      setUnreadDownloads(0);
+    }
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex transition-colors duration-200">
@@ -7441,13 +7929,20 @@ const App = () => {
                 <button
                   key={tool.id}
                   onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
                     ? 'bg-indigo-50 text-indigo-600 shadow-sm'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                     }`}
                 >
-                  <tool.icon size={20} />
-                  <span className="font-medium text-sm">{tool.label}</span>
+                  <span className="flex items-center space-x-3 min-w-0">
+                    <tool.icon size={20} className="shrink-0" />
+                    <span className="font-medium text-sm truncate">{tool.label}</span>
+                  </span>
+                  {tool.id === 'downloads' && unreadDownloads > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-600 text-white shrink-0">
+                      {unreadDownloads > 99 ? '99+' : unreadDownloads}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -7523,13 +8018,28 @@ const App = () => {
             <img src="./anvil.webp" alt="WorkTools" className="w-7 h-7 object-contain ml-2" />
             <span className="ml-2 font-bold">WorkTools</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 rounded-xl border border-gray-200 text-gray-600"
-          >
-            {darkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab('downloads')}
+              title="ประวัติดาวน์โหลด"
+              className="relative p-2 rounded-xl border border-gray-200 text-gray-600"
+            >
+              <History size={18} />
+              {unreadDownloads > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">
+                  {unreadDownloads > 9 ? '9+' : unreadDownloads}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 rounded-xl border border-gray-200 text-gray-600"
+            >
+              {darkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
+            </button>
+          </div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto">
@@ -7543,9 +8053,74 @@ const App = () => {
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
             {activeTab === 'bulk_rename' && <BulkRenamer />}
+            {activeTab === 'downloads' && <DownloadHistory />}
           </div>
         </div>
       </main>
+
+      {/* Global Download Completed Toast Notification */}
+      {downloadToast && (
+        <div className="fixed bottom-5 right-5 z-50 w-[calc(100%-2.5rem)] max-w-sm bg-white border border-gray-200 rounded-2xl shadow-2xl p-4 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
+              <CheckCircle2 size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-emerald-700">ดาวน์โหลดเสร็จสิ้น</span>
+                <button
+                  type="button"
+                  onClick={() => setDownloadToast(null)}
+                  className="text-gray-400 hover:text-gray-600 p-0.5 rounded-md"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+              <p className="text-sm font-semibold text-gray-900 truncate mt-0.5" title={downloadToast.fileName}>
+                {downloadToast.fileName}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                {formatSize(downloadToast.size || 0)} • {downloadToast.sourceTool}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                {isTauriDesktop && downloadToast.filePath && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => window.electronAPI?.openFilePath?.(downloadToast.filePath)}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1 transition-all"
+                    >
+                      <ExternalLink size={12} />
+                      <span>เปิดไฟล์</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.electronAPI?.showInFolder?.(downloadToast.filePath)}
+                      className="px-2.5 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold flex items-center gap-1 transition-all"
+                    >
+                      <FolderOpen size={12} />
+                      <span>เปิดโฟลเดอร์</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('downloads');
+                    setDownloadToast(null);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold flex items-center gap-1 transition-all"
+                >
+                  <History size={12} />
+                  <span>ดูประวัติ</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }`}</style>
     </div>
   );

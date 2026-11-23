@@ -52,6 +52,13 @@
     selectFolderForRename: () => invoke('select_folder_for_rename'),
     selectFilesForRename: () => invoke('select_files_for_rename'),
     executeBulkRename: (operations) => invoke('execute_bulk_rename', { operations }),
+    getDownloadDir: () => invoke('get_download_dir'),
+    chooseDownloadDir: () => invoke('choose_download_dir'),
+    saveDownloadFile: (fileName, dataBase64, customDir) =>
+      invoke('save_download_file', { fileName, dataBase64, customDir: customDir || null }),
+    openFilePath: (filePath) => invoke('open_file_path', { filePath }),
+    showInFolder: (filePath) => invoke('show_in_folder', { filePath }),
+    checkFilesExist: (paths) => invoke('check_files_exist', { paths }),
     checkForUpdates: () => invoke('check_for_updates'),
     downloadAndInstallUpdate: (downloadUrl) => invoke('download_and_install_update', { downloadUrl }),
     onUpdateProgress: (callback) => listenEvent('update-progress', callback),
