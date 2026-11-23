@@ -38,7 +38,7 @@ import {
   NotebookPen, MessageSquare, Send, Trash2, Maximize2,
   PanelLeftOpen, PanelRightOpen, PanelRightClose, Type,
   Monitor, Camera, Clipboard, Crop, Share2, RotateCcw,
-  Sparkles, Plus, ChevronLeft, ChevronRight, Sun, Moon, RefreshCw,
+  Sparkles, Plus, ChevronLeft, ChevronRight, ChevronDown, Sun, Moon, RefreshCw,
   Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
   RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers,
   Folder, FolderOpen, FolderPlus, ArrowRight, Undo2, History, FileArchive, Clock, CheckCircle2,
@@ -7950,24 +7950,72 @@ const App = () => {
     }
   }, [isElectron]);
 
-  const tools = [
-    { id: 'ocr', label: 'ดึงข้อความ OCR', icon: Zap },
-    { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type },
-    { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType },
-    { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
-    { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors },
-    { id: 'pdf_organize', label: 'จัดเรียง/หมุน/ลบ PDF', icon: LayoutGrid },
-    { id: 'pdf_protect', label: 'ล็อก/ปลดล็อก PDF', icon: Lock },
-    { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
-    { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
-    { id: 'bg_remover', label: 'ลบพื้นหลังรูปภาพ', icon: Wand2 },
-    { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
-    { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
-    { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
-    { id: 'bulk_folders', label: 'สร้างโฟลเดอร์เป็นชุด', icon: FolderPlus },
-    { id: 'duplicate_finder', label: 'ค้นหาไฟล์ซ้ำ', icon: Copy },
-    { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
+  const toolGroups = [
+    {
+      id: 'ai',
+      label: 'AI & OCR',
+      items: [
+        { id: 'ocr', label: 'ดึงข้อความ OCR', icon: Zap },
+        { id: 'bg_remover', label: 'ลบพื้นหลังรูปภาพ', icon: Wand2 },
+      ],
+    },
+    {
+      id: 'pdf',
+      label: 'จัดการ PDF',
+      items: [
+        { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type },
+        { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType },
+        { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
+        { id: 'pdf_split', label: 'แยกไฟล์ PDF', icon: Scissors },
+        { id: 'pdf_organize', label: 'จัดเรียง/หมุน/ลบ PDF', icon: LayoutGrid },
+        { id: 'pdf_protect', label: 'ล็อก/ปลดล็อก PDF', icon: Lock },
+        { id: 'pdf_conv', label: 'แปลง PDF/รูปภาพ', icon: FileType2 },
+      ],
+    },
+    {
+      id: 'media',
+      label: 'รูปภาพ & เครื่องมือ',
+      items: [
+        { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
+        { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
+        { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      id: 'files',
+      label: 'จัดการไฟล์ & ระบบ',
+      items: [
+        { id: 'bulk_rename', label: 'เปลี่ยนชื่อไฟล์/โฟลเดอร์', icon: FolderOpen },
+        { id: 'bulk_folders', label: 'สร้างโฟลเดอร์เป็นชุด', icon: FolderPlus },
+        { id: 'duplicate_finder', label: 'ค้นหาไฟล์ซ้ำ', icon: Copy },
+        { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
+      ],
+    },
   ];
+
+  const tools = toolGroups.flatMap((g) => g.items);
+
+  const [openGroups, setOpenGroups] = useState(() => {
+    try {
+      const saved = localStorage.getItem('worktools_sidebar_groups');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return { ai: true, pdf: true, media: false, files: false };
+  });
+
+  const toggleGroup = (groupId) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [groupId]: !prev[groupId] };
+      try {
+        localStorage.setItem('worktools_sidebar_groups', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // Global download interceptor & toast notification
   useEffect(() => {
@@ -7988,7 +8036,7 @@ const App = () => {
     };
   }, []);
 
-  // Track active tool label for download history tagging & clear unread badge on opening Downloads tab
+  // Track active tool label, auto-expand its group, & clear unread badge on opening Downloads tab
   useEffect(() => {
     const found = tools.find((t) => t.id === activeTab);
     if (found && found.id !== 'downloads') {
@@ -7997,24 +8045,28 @@ const App = () => {
     if (activeTab === 'downloads') {
       setUnreadDownloads(0);
     }
+    const parentGroup = toolGroups.find((g) => g.items.some((i) => i.id === activeTab));
+    if (parentGroup) {
+      setOpenGroups((prev) => (prev[parentGroup.id] ? prev : { ...prev, [parentGroup.id]: true }));
+    }
   }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex transition-colors duration-200">
       {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-5 h-full flex flex-col justify-between">
-          <div className="overflow-y-auto pr-1">
+        <div className="p-4 h-full flex flex-col justify-between">
+          <div className="overflow-y-auto pr-1 flex-1">
             {/* Brand Header with Custom Anvil Icon */}
-            <div className="flex items-center justify-between mb-8 px-1">
+            <div className="flex items-center justify-between mb-6 px-1">
               <div className="flex items-center gap-3">
                 <img
                   src="./anvil.webp"
                   alt="WorkTools Icon"
-                  className="w-11 h-11 object-contain drop-shadow-sm select-none"
+                  className="w-10 h-10 object-contain drop-shadow-sm select-none"
                 />
                 <div>
-                  <h1 className="font-bold text-xl leading-tight">WorkTools</h1>
+                  <h1 className="font-bold text-lg leading-tight">WorkTools</h1>
                   <p className="text-[11px] text-gray-400 font-mono">v{appVersion} {isElectron ? 'Portable' : ''}</p>
                 </div>
               </div>
@@ -8030,28 +8082,68 @@ const App = () => {
               </button>
             </div>
 
-            {/* Unified Menu List (No Category Split) */}
-            <nav className="space-y-1.5">
-              {tools.map((tool) => (
-                <button
-                  key={tool.id}
-                  onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${activeTab === tool.id
-                    ? 'bg-indigo-50 text-indigo-600 shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
-                >
-                  <span className="flex items-center space-x-3 min-w-0">
-                    <tool.icon size={20} className="shrink-0" />
-                    <span className="font-medium text-sm truncate">{tool.label}</span>
-                  </span>
-                  {tool.id === 'downloads' && unreadDownloads > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-600 text-white shrink-0">
-                      {unreadDownloads > 99 ? '99+' : unreadDownloads}
-                    </span>
-                  )}
-                </button>
-              ))}
+            {/* Collapsible Category Menu */}
+            <nav className="space-y-2">
+              {toolGroups.map((group) => {
+                const isOpen = Boolean(openGroups[group.id]);
+                const hasActiveItem = group.items.some((i) => i.id === activeTab);
+                const showGroupBadge = group.id === 'files' && !isOpen && unreadDownloads > 0;
+
+                return (
+                  <div key={group.id} className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold tracking-wide transition-colors ${
+                        hasActiveItem && !isOpen
+                          ? 'bg-indigo-50/70 text-indigo-700'
+                          : 'text-gray-500 hover:bg-gray-100/80 hover:text-gray-800'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span>{group.label}</span>
+                        <span className="text-[10px] font-normal text-gray-400">({group.items.length})</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        {showGroupBadge && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-indigo-600 text-white">
+                            {unreadDownloads > 99 ? '99+' : unreadDownloads}
+                          </span>
+                        )}
+                        <ChevronDown
+                          size={15}
+                          className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                        />
+                      </span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="space-y-0.5 pl-1">
+                        {group.items.map((tool) => (
+                          <button
+                            key={tool.id}
+                            onClick={() => { setActiveTab(tool.id); setSidebarOpen(false); }}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 ${activeTab === tool.id
+                              ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                              }`}
+                          >
+                            <span className="flex items-center space-x-2.5 min-w-0">
+                              <tool.icon size={18} className="shrink-0" />
+                              <span className="font-medium text-sm truncate">{tool.label}</span>
+                            </span>
+                            {tool.id === 'downloads' && unreadDownloads > 0 && (
+                              <span className="ml-2 px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-600 text-white shrink-0">
+                                {unreadDownloads > 99 ? '99+' : unreadDownloads}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
           </div>
 
