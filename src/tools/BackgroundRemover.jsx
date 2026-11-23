@@ -14,6 +14,10 @@ import {
   Undo2,
   MousePointerClick,
   Eye,
+  ZoomIn,
+  ZoomOut,
+  Hand,
+  Maximize2,
 } from 'lucide-react';
 import { downloadBlob } from '../downloadManager';
 
@@ -35,8 +39,10 @@ export default function BackgroundRemover() {
   const [softness, setSoftness] = useState(12);
 
   // Manual Editor tools on Result Canvas
-  const [editTool, setEditTool] = useState('erase'); // 'view' | 'erase' | 'restore' | 'wand'
-  const [brushSize, setBrushSize] = useState(36); // in original image px (scaled nicely)
+  const [editTool, setEditTool] = useState('erase'); // 'view' | 'pan' | 'erase' | 'restore' | 'wand'
+  const [brushSize, setBrushSize] = useState(36); // in original image px
+  const [zoom, setZoom] = useState(1); // 0.5 to 5
+  const [baseDisplaySize, setBaseDisplaySize] = useState({ w: 480, h: 360 });
   const [undoCount, setUndoCount] = useState(0);
   const [cursorPos, setCursorPos] = useState(null); // { x, y, r } in display CSS px
 
@@ -49,9 +55,11 @@ export default function BackgroundRemover() {
   const origCanvasRef = useRef(null);
   const workCanvasRef = useRef(null);
   const displayCanvasRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const undoStackRef = useRef([]);
   const isDrawingRef = useRef(false);
   const lastPtRef = useRef(null);
+  const panStartRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -128,6 +136,15 @@ export default function BackgroundRemover() {
     // Pick sensible default brush size proportional to image dimension
     const autoBrush = Math.max(12, Math.min(140, Math.round(Math.max(img.naturalWidth, img.naturalHeight) * 0.035)));
     setBrushSize(autoBrush);
+
+    // Fit base display size cleanly within 540x440 while preserving aspect ratio
+    const fitScale = Math.min(540 / img.naturalWidth, 440 / img.naturalHeight, 1);
+    setBaseDisplaySize({
+      w: Math.max(160, Math.round(img.naturalWidth * fitScale)),
+      h: Math.max(120, Math.round(img.naturalHeight * fitScale)),
+    });
+    setZoom(1);
+
     setHasResult(true);
     setTimeout(() => redrawDisplay(), 0);
   };
@@ -385,6 +402,21 @@ export default function BackgroundRemover() {
 
   const handlePointerDown = (e) => {
     if (editTool === 'view' || !hasResult) return;
+
+    if (editTool === 'pan' || e.button === 1) {
+      e.preventDefault();
+      const scroller = scrollContainerRef.current;
+      if (!scroller) return;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      panStartRef.current = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
+      };
+      return;
+    }
+
     e.preventDefault();
     const pt = getCanvasPoint(e);
     if (!pt) return;
@@ -403,6 +435,15 @@ export default function BackgroundRemover() {
   };
 
   const handlePointerMove = (e) => {
+    if (panStartRef.current) {
+      const scroller = scrollContainerRef.current;
+      if (scroller) {
+        scroller.scrollLeft = panStartRef.current.scrollLeft - (e.clientX - panStartRef.current.clientX);
+        scroller.scrollTop = panStartRef.current.scrollTop - (e.clientY - panStartRef.current.clientY);
+      }
+      return;
+    }
+
     const pt = getCanvasPoint(e);
     if (pt && (editTool === 'erase' || editTool === 'restore')) {
       setCursorPos({ x: pt.cssX, y: pt.cssY, r: Math.max(4, pt.cssRadius) });
@@ -419,6 +460,17 @@ export default function BackgroundRemover() {
   const handlePointerUp = () => {
     isDrawingRef.current = false;
     lastPtRef.current = null;
+    panStartRef.current = null;
+  };
+
+  const adjustZoom = (delta) => {
+    setZoom((prev) => Math.max(0.5, Math.min(5, Number((prev + delta).toFixed(2)))));
+  };
+
+  const handleCanvasWheel = (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    adjustZoom(e.deltaY < 0 ? 0.25 : -0.25);
   };
 
   // Build final export blob from editable workCanvasRef
@@ -710,6 +762,18 @@ export default function BackgroundRemover() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setEditTool('pan')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all ${
+                    editTool === 'pan'
+                      ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <Hand size={14} />
+                  <span>เลื่อนภาพ</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setEditTool('view')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                     editTool === 'view'
@@ -795,49 +859,94 @@ export default function BackgroundRemover() {
                 <span className="text-xs font-bold text-gray-700">
                   พื้นที่แก้ไขและผลลัพธ์ (After — ระบายหรือจิ้มลบได้ตรงนี้)
                 </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setOutputBg('transparent')}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
-                      outputBg === 'transparent'
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                        : 'border-gray-200 text-gray-600'
-                    }`}
-                  >
-                    โปร่งใส
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOutputBg('white')}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
-                      outputBg === 'white'
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                        : 'border-gray-200 text-gray-600'
-                    }`}
-                  >
-                    พื้นขาว
-                  </button>
-                  <label className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-gray-200 cursor-pointer">
-                    <input
-                      type="color"
-                      value={customBgColor}
-                      onChange={(e) => {
-                        setCustomBgColor(e.target.value);
-                        setOutputBg('custom');
-                      }}
-                      className="w-3.5 h-3.5 border-0 p-0 cursor-pointer"
-                    />
-                    <span>สีพื้น</span>
-                  </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Zoom Controls */}
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => adjustZoom(-0.25)}
+                      disabled={zoom <= 0.5}
+                      title="ซูมออก"
+                      className="p-1 rounded-md hover:bg-white text-gray-700 disabled:opacity-35 transition-all"
+                    >
+                      <ZoomOut size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setZoom(1)}
+                      title="รีเซ็ตซูมเป็น 100%"
+                      className="px-1.5 text-[11px] font-mono font-bold text-gray-700 hover:text-indigo-600 min-w-[42px] text-center"
+                    >
+                      {Math.round(zoom * 100)}%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustZoom(0.25)}
+                      disabled={zoom >= 5}
+                      title="ซูมเข้า (หรือกด Ctrl + Scroll)"
+                      className="p-1 rounded-md hover:bg-white text-gray-700 disabled:opacity-35 transition-all"
+                    >
+                      <ZoomIn size={14} />
+                    </button>
+                    {zoom !== 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setZoom(1)}
+                        title="พอดีกรอบ"
+                        className="p-1 rounded-md hover:bg-white text-indigo-600 transition-all"
+                      >
+                        <Maximize2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Background Preview Switcher */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setOutputBg('transparent')}
+                      className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
+                        outputBg === 'transparent'
+                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 text-gray-600'
+                      }`}
+                    >
+                      โปร่งใส
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOutputBg('white')}
+                      className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
+                        outputBg === 'white'
+                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 text-gray-600'
+                      }`}
+                    >
+                      พื้นขาว
+                    </button>
+                    <label className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-gray-200 cursor-pointer">
+                      <input
+                        type="color"
+                        value={customBgColor}
+                        onChange={(e) => {
+                          setCustomBgColor(e.target.value);
+                          setOutputBg('custom');
+                        }}
+                        className="w-3.5 h-3.5 border-0 p-0 cursor-pointer"
+                      />
+                      <span>สีพื้น</span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
               <div
-                className="rounded-xl overflow-hidden flex items-center justify-center p-3 border border-gray-200 min-h-[320px]"
+                ref={scrollContainerRef}
+                onWheel={handleCanvasWheel}
+                className="rounded-xl overflow-auto border border-gray-200 h-[440px] p-4 flex"
                 style={previewBgStyle}
               >
-                <div className="relative inline-flex items-center justify-center max-w-full">
+                <div className="relative m-auto shrink-0">
                   <canvas
                     ref={displayCanvasRef}
                     onPointerDown={handlePointerDown}
@@ -848,9 +957,15 @@ export default function BackgroundRemover() {
                       handlePointerUp();
                       setCursorPos(null);
                     }}
-                    className={`max-w-full max-h-[480px] object-contain touch-none select-none ${
+                    style={{
+                      width: `${Math.round(baseDisplaySize.w * zoom)}px`,
+                      height: `${Math.round(baseDisplaySize.h * zoom)}px`,
+                    }}
+                    className={`block touch-none select-none shadow-sm ${
                       editTool === 'wand'
                         ? 'cursor-crosshair'
+                        : editTool === 'pan'
+                        ? 'cursor-grab active:cursor-grabbing'
                         : editTool === 'erase' || editTool === 'restore'
                         ? 'cursor-none'
                         : 'cursor-default'
@@ -871,6 +986,9 @@ export default function BackgroundRemover() {
                   )}
                 </div>
               </div>
+              <p className="text-[11px] text-gray-400">
+                เคล็ดลับ: กด <strong>Ctrl + เลื่อนลูกกลิ้งเมาส์</strong> เพื่อซูมเข้า-ออกได้สูงสุด 500% และสลับไปปุ่ม <strong>เลื่อนภาพ</strong> (หรือกดปุ่มกลางเมาส์ลาก) เพื่อเลื่อนดูรายละเอียดขอบภาพ
+              </p>
 
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
