@@ -296,8 +296,46 @@ fn is_newer_version(latest: &str, current: &str) -> bool {
 #[tauri::command]
 async fn check_for_updates(app: AppHandle) -> serde_json::Value {
     let current_version = app.package_info().version.to_string();
-    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
 
+    // Primary check: GitHub web redirect (ZERO API rate limit, never hits HTTP 403!)
+    let redirect_url = format!("https://github.com/{}/releases/latest", GITHUB_REPO);
+    if let Ok(no_redirect_client) = reqwest::Client::builder()
+        .user_agent("WorkTools-Tauri-Updater")
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        if let Ok(res) = no_redirect_client
+            .head(&redirect_url)
+            .header("Cache-Control", "no-cache")
+            .send()
+            .await
+        {
+            if let Some(loc) = res.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {
+                if let Some(tag) = loc.rsplit("/tag/").next() {
+                    let clean_tag = tag.trim().trim_end_matches('/');
+                    let latest_version = clean_tag.trim_start_matches(['v', 'V']).to_string();
+                    if !latest_version.is_empty() && latest_version.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        let download_url = format!(
+                            "https://github.com/{}/releases/download/{}/WorkTools-{}-Portable.exe",
+                            GITHUB_REPO, clean_tag, latest_version
+                        );
+                        let has_update = is_newer_version(&latest_version, &current_version);
+                        return serde_json::json!({
+                            "success": true,
+                            "currentVersion": current_version,
+                            "latestVersion": latest_version,
+                            "hasUpdate": has_update,
+                            "downloadUrl": download_url,
+                            "releaseUrl": loc
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback check: GitHub REST API
+    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
     let client = match reqwest::Client::builder()
         .user_agent("WorkTools-Tauri-Updater")
         .build()
@@ -353,29 +391,25 @@ async fn check_for_updates(app: AppHandle) -> serde_json::Value {
                     "releaseUrl": json["html_url"].as_str().unwrap_or("")
                 });
             }
-            return serde_json::json!({
+            serde_json::json!({
                 "success": false,
                 "currentVersion": current_version,
                 "hasUpdate": false,
                 "error": "ไม่สามารถอ่านข้อมูล Release จาก GitHub ได้"
-            });
+            })
         }
-        Ok(res) => {
-            return serde_json::json!({
-                "success": false,
-                "currentVersion": current_version,
-                "hasUpdate": false,
-                "error": format!("เช็กอัปเดตไม่สำเร็จ (HTTP {})", res.status())
-            });
-        }
-        Err(e) => {
-            return serde_json::json!({
-                "success": false,
-                "currentVersion": current_version,
-                "hasUpdate": false,
-                "error": format!("เชื่อมต่อ GitHub ไม่ได้: {}", e)
-            });
-        }
+        Ok(res) => serde_json::json!({
+            "success": false,
+            "currentVersion": current_version,
+            "hasUpdate": false,
+            "error": format!("เช็กอัปเดตไม่สำเร็จ (HTTP {})", res.status())
+        }),
+        Err(e) => serde_json::json!({
+            "success": false,
+            "currentVersion": current_version,
+            "hasUpdate": false,
+            "error": format!("เชื่อมต่อ GitHub ไม่ได้: {}", e)
+        }),
     }
 }
 
