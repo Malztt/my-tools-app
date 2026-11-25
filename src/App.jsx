@@ -8249,12 +8249,7 @@ const App = () => {
             {activeTab === 'pdf_split' && <PdfSplitter />}
             {activeTab === 'pdf_organize' && <PdfOrganizer />}
             {activeTab === 'pdf_protect' && <PdfProtect />}
-            {activeTab === 'pdf_searchable' && (
-              <PdfSearchable
-                apiKey={geminiApiKey}
-                onOpenApiKeySettings={() => setActiveTab('api_keys')}
-              />
-            )}
+            {activeTab === 'pdf_searchable' && <PdfSearchable />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
             {activeTab === 'xls_conv' && <ExcelConverter />}

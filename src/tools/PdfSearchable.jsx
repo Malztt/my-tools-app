@@ -7,7 +7,6 @@ import {
   Upload,
   Sparkles,
   Cpu,
-  Key,
   Check,
   Download,
   RefreshCw,
@@ -24,25 +23,6 @@ import {
   Trash2,
 } from 'lucide-react';
 import { downloadBlob } from '../downloadManager';
-
-const GEMINI_OCR_JSON_PROMPT = `You are a precise document OCR engine.
-Extract ALL visible text lines from this document page image with their exact bounding boxes.
-Return ONLY a valid JSON object matching this schema:
-{
-  "lines": [
-    {
-      "text": "exact text of this line in original language (Thai, English, numbers, symbols)",
-      "box": [ymin, xmin, ymax, xmax]
-    }
-  ]
-}
-Rules:
-- Coordinates in "box" MUST be integers on a 0 to 1000 normalized scale where (0, 0) is top-left and (1000, 1000) is bottom-right of the image.
-- Preserve Thai spelling, tone marks, vowels, spaces, and English text accurately.
-- Group text by visual reading line (or table cell if columns are widely separated).
-- Order lines from top to bottom, left to right.
-- If the page has no readable text, return {"lines": []}.
-- Output ONLY raw JSON without markdown fences or explanation.`;
 
 const formatBytes = (bytes) => {
   if (!bytes) return '0 B';
@@ -77,58 +57,6 @@ const parsePageRange = (rangeStr, totalPages) => {
     }
   }
   return result;
-};
-
-// Parse Gemini JSON response safely (handles accidental markdown code fences)
-const parseGeminiLines = (rawText) => {
-  if (!rawText) return [];
-  let cleaned = rawText.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-
-  let parsed = null;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    // Fallback: try extracting the first JSON object or array
-    const objStart = cleaned.indexOf('{');
-    const objEnd = cleaned.lastIndexOf('}');
-    if (objStart !== -1 && objEnd > objStart) {
-      try {
-        parsed = JSON.parse(cleaned.slice(objStart, objEnd + 1));
-      } catch {
-        return [];
-      }
-    } else {
-      return [];
-    }
-  }
-
-  const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.lines) ? parsed.lines : [];
-  return arr
-    .map((item) => {
-      const text = String(item?.text || '').replace(/\s+/g, ' ').trim();
-      const box = Array.isArray(item?.box)
-        ? item.box
-        : Array.isArray(item?.box_2d)
-          ? item.box_2d
-          : null;
-      if (!text || !box || box.length < 4) return null;
-      const [ymin, xmin, ymax, xmax] = box.map((n) => Number(n));
-      if ([ymin, xmin, ymax, xmax].some((n) => Number.isNaN(n))) return null;
-      const nx = Math.max(0, Math.min(1, xmin / 1000));
-      const ny = Math.max(0, Math.min(1, ymin / 1000));
-      const nx2 = Math.max(nx + 0.005, Math.min(1, xmax / 1000));
-      const ny2 = Math.max(ny + 0.005, Math.min(1, ymax / 1000));
-      return {
-        text,
-        nx,
-        ny,
-        nw: nx2 - nx,
-        nh: ny2 - ny,
-      };
-    })
-    .filter(Boolean);
 };
 
 // Sanitize text so fontkit/pdf-lib won't crash on unsupported glyphs (e.g. emojis)
@@ -221,9 +149,8 @@ const drawNormalizedLine = (page, font, line, visibleDebug = false) => {
   });
 };
 
-export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
-  // OCR Engine State
-  const [engine, setEngine] = useState('gemini'); // 'gemini' | 'tesseract'
+export default function PdfSearchable() {
+  // Offline Tesseract OCR Language State
   const [tessLang, setTessLang] = useState('tha+eng'); // 'tha+eng' | 'tha' | 'eng'
 
   // File & Page Analysis State
@@ -255,7 +182,6 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
   const [copiedAll, setCopiedAll] = useState(false);
 
   const fileInputRef = useRef(null);
-  const hasApiKey = Boolean(apiKey && apiKey.trim());
 
   // Load & analyze PDF pages
   const loadPdfFile = async (selectedFile) => {
@@ -380,39 +306,6 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
     };
   };
 
-  // Run Gemini Vision OCR on a single page image
-  const ocrPageWithGemini = async (dataUrl, key) => {
-    const base64Data = dataUrl.replace(/^data:.+;base64,/, '');
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: GEMINI_OCR_JSON_PROMPT },
-                { inline_data: { mime_type: 'image/jpeg', data: base64Data } },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0,
-          },
-        }),
-      }
-    );
-
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data?.error?.message || `HTTP ${response.status}`);
-    }
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return parseGeminiLines(raw);
-  };
-
   // Run Tesseract OCR on a single page image using a shared worker
   const ocrPageWithTesseract = async (worker, dataUrl, imgW, imgH) => {
     const result = await worker.recognize(dataUrl, {}, { blocks: true });
@@ -461,7 +354,7 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
     return lines;
   };
 
-  // Main OCR Processing Loop
+  // Main OCR Processing Loop (Offline Tesseract)
   const handleStartOcr = async () => {
     if (!pdfBuffer || pages.length === 0) {
       setError('กรุณาเลือกไฟล์ PDF ก่อน');
@@ -469,10 +362,6 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
     }
     if (targetPageSet.size === 0) {
       setError('ไม่มีหน้าใดที่ถูกเลือกสำหรับทำ OCR กรุณาเปลี่ยนขอบเขตหน้า');
-      return;
-    }
-    if (engine === 'gemini' && !hasApiKey) {
-      setError('ยังไม่ได้ตั้งค่า Gemini API Key กรุณาไปที่เมนู "ตั้งค่า API Key" หรือสลับไปใช้โหมดออฟไลน์ (Tesseract)');
       return;
     }
 
@@ -487,17 +376,15 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
     try {
       const pdfDocJs = await pdfjs.getDocument({ data: pdfBuffer.slice(0) }).promise;
 
-      if (engine === 'tesseract') {
-        setProgressMsg(`กำลังโหลดโมเดลภาษาออฟไลน์ (${tessLang}) ครั้งแรกอาจใช้เวลาสักครู่...`);
-        const Tesseract = await import('tesseract.js');
-        tessWorker = await Tesseract.createWorker(tessLang, 1, {
-          logger: (m) => {
-            if (m.status === 'loading language traineddata' || m.status === 'initializing api') {
-              setProgressMsg(`กำลังเตรียม Tesseract (${Math.round((m.progress || 0) * 100)}%)...`);
-            }
-          },
-        });
-      }
+      setProgressMsg(`กำลังโหลดโมเดลภาษาออฟไลน์ (${tessLang}) ครั้งแรกอาจใช้เวลาสักครู่...`);
+      const Tesseract = await import('tesseract.js');
+      tessWorker = await Tesseract.createWorker(tessLang, 1, {
+        logger: (m) => {
+          if (m.status === 'loading language traineddata' || m.status === 'initializing api') {
+            setProgressMsg(`กำลังเตรียม Tesseract (${Math.round((m.progress || 0) * 100)}%)...`);
+          }
+        },
+      });
 
       const targetList = Array.from(targetPageSet).sort((a, b) => a - b);
       let completed = 0;
@@ -521,12 +408,12 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
 
         try {
           const rendered = await renderPageForOcr(pdfDocJs, pageNum, renderScale);
-          let detectedLines = [];
-          if (engine === 'gemini') {
-            detectedLines = await ocrPageWithGemini(rendered.dataUrl, apiKey.trim());
-          } else {
-            detectedLines = await ocrPageWithTesseract(tessWorker, rendered.dataUrl, rendered.width, rendered.height);
-          }
+          const detectedLines = await ocrPageWithTesseract(
+            tessWorker,
+            rendered.dataUrl,
+            rendered.width,
+            rendered.height
+          );
 
           setPages((prev) =>
             prev.map((p) =>
@@ -724,115 +611,47 @@ export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
         )}
       </div>
 
-      {/* Engine Selector + API Key Bar */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => setEngine('gemini')}
-            disabled={isProcessing}
-            className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
-              engine === 'gemini'
-                ? 'border-indigo-500 bg-indigo-50/70 ring-1 ring-indigo-500'
-                : 'border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-              engine === 'gemini' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'
-            }`}>
-              <Sparkles size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-gray-900">Gemini AI Vision</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">แนะนำ</span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                แม่นยำสูงมากสำหรับภาษาไทย ตาราง และเอกสารสแกน (ใช้ Gemini API Key เดียวกับเมนู OCR)
-              </p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setEngine('tesseract')}
-            disabled={isProcessing}
-            className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
-              engine === 'tesseract'
-                ? 'border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500'
-                : 'border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-              engine === 'tesseract' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'
-            }`}>
-              <Cpu size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-gray-900">Tesseract OCR (ออฟไลน์)</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">ฟรี ไม่ใช้ Key</span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                ประมวลผลในเครื่อง 100% ไฟล์ไม่ออกนอกเครื่อง เหมาะกับเอกสารลับหรือไม่มี API Key
-              </p>
-            </div>
-          </button>
-        </div>
-
-        {/* Engine Specific Config */}
-        {engine === 'gemini' ? (
-          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <Key size={14} className={hasApiKey ? 'text-emerald-600' : 'text-amber-500'} />
-              <span>สถานะ Gemini API Key:</span>
-              <span
-                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold ${
-                  hasApiKey
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                }`}
-              >
-                {hasApiKey ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-                <span>{hasApiKey ? 'มี API Key แล้ว' : 'ยังไม่มี API Key'}</span>
+      {/* Offline Tesseract OCR Bar */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <Cpu size={18} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-gray-900">Tesseract OCR (ออฟไลน์ 100%)</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                ไม่จำกัดโควตา • ไม่ใช้ API Key
               </span>
             </div>
-            {onOpenApiKeySettings && (
-              <button
-                type="button"
-                onClick={onOpenApiKeySettings}
-                className="text-xs font-semibold text-indigo-600 hover:underline"
-              >
-                {hasApiKey ? 'จัดการที่เมนูตั้งค่า API Key' : 'ไปตั้งค่า API Key'}
-              </button>
-            )}
+            <p className="text-xs text-gray-500 mt-0.5">
+              ประมวลผลในเครื่องทั้งหมด ปลอดภัย ไฟล์ไม่ออกนอกเครื่อง
+            </p>
           </div>
-        ) : (
-          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
-            <span className="text-xs font-semibold text-gray-700">ภาษาที่ต้องการให้ Tesseract อ่าน:</span>
-            <div className="flex items-center gap-2">
-              {[
-                { id: 'tha+eng', label: 'ไทย + อังกฤษ' },
-                { id: 'tha', label: 'ภาษาไทย' },
-                { id: 'eng', label: 'ภาษาอังกฤษ' },
-              ].map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => setTessLang(opt.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    tessLang === opt.id
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-600">ภาษา:</span>
+          {[
+            { id: 'tha+eng', label: 'ไทย + อังกฤษ' },
+            { id: 'tha', label: 'ภาษาไทย' },
+            { id: 'eng', label: 'ภาษาอังกฤษ' },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={isProcessing}
+              onClick={() => setTessLang(opt.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                tessLang === opt.id
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Hidden File Input */}

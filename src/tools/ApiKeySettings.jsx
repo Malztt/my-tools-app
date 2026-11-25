@@ -10,7 +10,6 @@ import {
   AlertCircle,
   ShieldCheck,
   Zap,
-  FileSearch,
 } from 'lucide-react';
 
 export default function ApiKeySettings({ geminiApiKey, onSaveGeminiApiKey }) {
@@ -141,10 +140,6 @@ export default function ApiKeySettings({ geminiApiKey, onSaveGeminiApiKey }) {
             <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-xs">
               <Zap size={15} className="text-indigo-600 shrink-0" />
               <span className="font-medium text-gray-800">ดึงข้อความ OCR</span>
-            </div>
-            <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-xs">
-              <FileSearch size={15} className="text-indigo-600 shrink-0" />
-              <span className="font-medium text-gray-800">ทำ PDF ค้นหาได้ (OCR)</span>
             </div>
           </div>
         </div>
