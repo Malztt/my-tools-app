@@ -172,9 +172,65 @@ const drawNormalizedLine = (page, font, line, visibleDebug = false) => {
   }
 };
 
+// Fast grayscale + percentile contrast stretch + mild ink sharpening (preserves thin Thai tone marks)
+const preprocessCanvasForOcr = (canvas) => {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = canvas;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+  const totalPixels = width * height;
+  const lum = new Uint8Array(totalPixels);
+  const hist = new Uint32Array(256);
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const y = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    lum[p] = y;
+    hist[y]++;
+  }
+
+  // Find 1% dark clip and 92% white paper point to whiten scanned backgrounds without erasing thin strokes
+  let lo = 0;
+  let hi = 255;
+  let acc = 0;
+  const loTarget = totalPixels * 0.01;
+  const hiTarget = totalPixels * 0.92;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc >= loTarget) {
+      lo = v;
+      break;
+    }
+  }
+  acc = 0;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc >= hiTarget) {
+      hi = v;
+      break;
+    }
+  }
+
+  const range = Math.max(20, hi - lo);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    let norm = (lum[p] - lo) / range;
+    if (norm < 0) norm = 0;
+    if (norm > 1) norm = 1;
+    // Gentle gamma/contrast curve: darkens ink slightly while pushing near-white paper to pure white
+    const out = norm > 0.88 ? 255 : Math.round(Math.pow(norm, 1.15) * 255);
+    data[i] = out;
+    data[i + 1] = out;
+    data[i + 2] = out;
+    data[i + 3] = 255;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+};
+
 export default function PdfSearchable() {
-  // Offline Tesseract OCR Language State
+  // Offline Tesseract OCR State
   const [tessLang, setTessLang] = useState('tha+eng'); // 'tha+eng' | 'tha' | 'eng'
+  const [tessModel, setTessModel] = useState('best'); // 'best' (tessdata_best) | 'fast' (tessdata_fast)
+  const [enhanceScan, setEnhanceScan] = useState(true);
 
   // File & Page Analysis State
   const [file, setFile] = useState(null);
@@ -186,7 +242,7 @@ export default function PdfSearchable() {
   // Processing Options
   const [pageScope, setPageScope] = useState('missing_only'); // 'missing_only' | 'all' | 'custom'
   const [customRange, setCustomRange] = useState('');
-  const [renderScale, setRenderScale] = useState(2.0); // 1.5 (fast) | 2.0 (balanced) | 2.5 (high)
+  const [renderScale, setRenderScale] = useState(2.5); // 1.5 (fast) | 2.0 (balanced) | 2.5 (high)
   const [visibleDebugLayer, setVisibleDebugLayer] = useState(false);
 
   // Run State
@@ -311,19 +367,22 @@ export default function PdfSearchable() {
     [pages]
   );
 
-  // Render a single PDF page to JPEG DataURL at high resolution for OCR
-  const renderPageForOcr = async (pdfDocJs, pageNum, scale) => {
+  // Render a single PDF page to crisp PNG DataURL at high resolution for OCR
+  const renderPageForOcr = async (pdfDocJs, pageNum, scale, enhance) => {
     const page = await pdfDocJs.getPage(pageNum);
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.floor(viewport.width));
     canvas.height = Math.max(1, Math.floor(viewport.height));
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+    if (enhance) {
+      preprocessCanvasForOcr(canvas);
+    }
     return {
-      dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+      dataUrl: canvas.toDataURL('image/png'),
       width: canvas.width,
       height: canvas.height,
     };
@@ -399,14 +458,29 @@ export default function PdfSearchable() {
     try {
       const pdfDocJs = await pdfjs.getDocument({ data: pdfBuffer.slice(0) }).promise;
 
-      setProgressMsg(`กำลังโหลดโมเดลภาษาออฟไลน์ (${tessLang}) ครั้งแรกอาจใช้เวลาสักครู่...`);
+      const isBest = tessModel === 'best';
+      const langPath = isBest
+        ? 'https://tessdata.projectnaptha.com/4.0.0_best'
+        : 'https://tessdata.projectnaptha.com/4.0.0_fast';
+      const cachePath = isBest ? './tessdata-best' : './tessdata-fast';
+
+      setProgressMsg(
+        `กำลังโหลดโมเดล ${isBest ? 'Best (แม่นยำสูง)' : 'Fast (เร็ว)'} (${tessLang}) ครั้งแรกอาจใช้เวลาสักครู่...`
+      );
       const Tesseract = await import('tesseract.js');
       tessWorker = await Tesseract.createWorker(tessLang, 1, {
+        langPath,
+        cachePath,
         logger: (m) => {
           if (m.status === 'loading language traineddata' || m.status === 'initializing api') {
-            setProgressMsg(`กำลังเตรียม Tesseract (${Math.round((m.progress || 0) * 100)}%)...`);
+            setProgressMsg(
+              `กำลังเตรียมโมเดล ${isBest ? 'Best' : 'Fast'} (${Math.round((m.progress || 0) * 100)}%)...`
+            );
           }
         },
+      });
+      await tessWorker.setParameters({
+        preserve_interword_spaces: '1',
       });
 
       const targetList = Array.from(targetPageSet).sort((a, b) => a - b);
@@ -430,7 +504,7 @@ export default function PdfSearchable() {
         setProgressMsg(`กำลังอ่านข้อความหน้า ${pageNum} / ${pages.length} (${completed + 1} จาก ${targetList.length} หน้า)...`);
 
         try {
-          const rendered = await renderPageForOcr(pdfDocJs, pageNum, renderScale);
+          const rendered = await renderPageForOcr(pdfDocJs, pageNum, renderScale, enhanceScan);
           const detectedLines = await ocrPageWithTesseract(
             tessWorker,
             rendered.dataUrl,
@@ -648,45 +722,89 @@ export default function PdfSearchable() {
       </div>
 
       {/* Offline Tesseract OCR Bar */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-            <Cpu size={18} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-gray-900">Tesseract OCR (ออฟไลน์ 100%)</span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                ไม่จำกัดโควตา • ไม่ใช้ API Key
-              </span>
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+              <Cpu size={18} />
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              ประมวลผลในเครื่องทั้งหมด ปลอดภัย ไฟล์ไม่ออกนอกเครื่อง
-            </p>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-gray-900">Tesseract OCR (ออฟไลน์ 100%)</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                  ไม่จำกัดโควตา • ไม่ใช้ API Key
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                ประมวลผลในเครื่องทั้งหมด แยกเธรดไม่ทำให้แอปค้าง
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-gray-600">ภาษา:</span>
+            {[
+              { id: 'tha+eng', label: 'ไทย + อังกฤษ' },
+              { id: 'tha', label: 'ภาษาไทย' },
+              { id: 'eng', label: 'ภาษาอังกฤษ' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={isProcessing}
+                onClick={() => setTessLang(opt.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  tessLang === opt.id
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-gray-600">ภาษา:</span>
-          {[
-            { id: 'tha+eng', label: 'ไทย + อังกฤษ' },
-            { id: 'tha', label: 'ภาษาไทย' },
-            { id: 'eng', label: 'ภาษาอังกฤษ' },
-          ].map((opt) => (
+        {/* Model Quality & Scan Enhancement Row */}
+        <div className="pt-3 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-gray-600">ความแม่นยำโมเดล:</span>
             <button
-              key={opt.id}
               type="button"
               disabled={isProcessing}
-              onClick={() => setTessLang(opt.id)}
+              onClick={() => setTessModel('best')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                tessLang === opt.id
-                  ? 'bg-emerald-600 text-white shadow-sm'
+                tessModel === 'best'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {opt.label}
+              แม่นยำสูง (Best — แนะนำ)
             </button>
-          ))}
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={() => setTessModel('fast')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                tessModel === 'fast'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              เร็ว (Fast)
+            </button>
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={enhanceScan}
+              onChange={(e) => setEnhanceScan(e.target.checked)}
+              disabled={isProcessing}
+              className="rounded text-indigo-600"
+            />
+            <span className="font-medium">ปรับภาพขาว-ดำ &amp; คมชัดก่อนอ่าน (ลดสระ/วรรณยุกต์เพี้ยน)</span>
+          </label>
         </div>
       </div>
 
