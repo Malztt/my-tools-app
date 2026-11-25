@@ -1,5 +1,14 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { PDFDocument, rgb, degrees } from 'pdf-lib';
+import {
+  PDFDocument,
+  PDFContentStream,
+  rgb,
+  degrees,
+  TextRenderingMode,
+  setTextRenderingMode,
+  pushGraphicsState,
+  popGraphicsState,
+} from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import * as pdfjs from 'pdfjs-dist';
 import {
@@ -138,15 +147,29 @@ const drawNormalizedLine = (page, font, line, visibleDebug = false) => {
     // ignore width measurement error
   }
 
-  page.drawText(safeText, {
-    x: pdfX,
-    y: pdfY,
-    size: fontSize,
-    font,
-    color: visibleDebug ? rgb(0.15, 0.35, 0.9) : rgb(0, 0, 0),
-    opacity: visibleDebug ? 0.35 : 0,
-    rotate: textRot,
-  });
+  if (visibleDebug) {
+    page.drawText(safeText, {
+      x: pdfX,
+      y: pdfY,
+      size: fontSize,
+      font,
+      color: rgb(0.15, 0.35, 0.9),
+      opacity: 0.35,
+      rotate: textRot,
+    });
+  } else {
+    // Official PDF OCR standard: Text Rendering Mode 3 (Invisible) for reliable Ctrl+F & Copy/Paste in all viewers
+    page.pushOperators(pushGraphicsState(), setTextRenderingMode(TextRenderingMode.Invisible));
+    page.drawText(safeText, {
+      x: pdfX,
+      y: pdfY,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+      rotate: textRot,
+    });
+    page.pushOperators(popGraphicsState());
+  }
 };
 
 export default function PdfSearchable() {
@@ -509,6 +532,19 @@ export default function PdfSearchable() {
         if (!pageData.ocrLines || pageData.ocrLines.length === 0) continue;
         const pdfPage = docPages[pageData.pageNum - 1];
         if (!pdfPage) continue;
+
+        // Isolate existing page graphics state (CTM / clip paths from scanners) so OCR text aligns & stays selectable
+        try {
+          const startStream = pdfDoc.context.register(
+            PDFContentStream.of(pdfDoc.context.obj({}), [pushGraphicsState()])
+          );
+          const endStream = pdfDoc.context.register(
+            PDFContentStream.of(pdfDoc.context.obj({}), [popGraphicsState()])
+          );
+          pdfPage.node.wrapContentStreams(startStream, endStream);
+        } catch {
+          // ignore if page has no existing content streams
+        }
 
         for (const line of pageData.ocrLines) {
           if (!line.text || !line.text.trim()) continue;
