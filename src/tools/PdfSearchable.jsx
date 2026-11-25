@@ -8,8 +8,6 @@ import {
   Sparkles,
   Cpu,
   Key,
-  Eye,
-  EyeOff,
   Check,
   Download,
   RefreshCw,
@@ -223,16 +221,9 @@ const drawNormalizedLine = (page, font, line, visibleDebug = false) => {
   });
 };
 
-export default function PdfSearchable() {
-  // OCR Engine & API Key (shared with GeminiOCR tool)
+export default function PdfSearchable({ apiKey = '', onOpenApiKeySettings }) {
+  // OCR Engine State
   const [engine, setEngine] = useState('gemini'); // 'gemini' | 'tesseract'
-  const [apiKey, setApiKey] = useState(() => {
-    const saved = localStorage.getItem('gemini_api_key');
-    return saved || import.meta.env.VITE_GEMINI_API_KEY || '';
-  });
-  const [showKeyInput, setShowKeyInput] = useState(() => !localStorage.getItem('gemini_api_key') && !import.meta.env.VITE_GEMINI_API_KEY);
-  const [showKeyText, setShowKeyText] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
   const [tessLang, setTessLang] = useState('tha+eng'); // 'tha+eng' | 'tha' | 'eng'
 
   // File & Page Analysis State
@@ -264,21 +255,7 @@ export default function PdfSearchable() {
   const [copiedAll, setCopiedAll] = useState(false);
 
   const fileInputRef = useRef(null);
-
-  const handleSaveApiKey = () => {
-    const trimmed = apiKey.trim();
-    setApiKey(trimmed);
-    if (trimmed) {
-      localStorage.setItem('gemini_api_key', trimmed);
-      setKeySaved(true);
-      setTimeout(() => {
-        setKeySaved(false);
-        setShowKeyInput(false);
-      }, 1000);
-    } else {
-      localStorage.removeItem('gemini_api_key');
-    }
-  };
+  const hasApiKey = Boolean(apiKey && apiKey.trim());
 
   // Load & analyze PDF pages
   const loadPdfFile = async (selectedFile) => {
@@ -494,9 +471,8 @@ export default function PdfSearchable() {
       setError('ไม่มีหน้าใดที่ถูกเลือกสำหรับทำ OCR กรุณาเปลี่ยนขอบเขตหน้า');
       return;
     }
-    if (engine === 'gemini' && !apiKey.trim()) {
-      setShowKeyInput(true);
-      setError('กรุณาใส่ Gemini API Key ก่อน หรือสลับไปใช้โหมดออฟไลน์ (Tesseract)');
+    if (engine === 'gemini' && !hasApiKey) {
+      setError('ยังไม่ได้ตั้งค่า Gemini API Key กรุณาไปที่เมนู "ตั้งค่า API Key" หรือสลับไปใช้โหมดออฟไลน์ (Tesseract)');
       return;
     }
 
@@ -806,55 +782,29 @@ export default function PdfSearchable() {
 
         {/* Engine Specific Config */}
         {engine === 'gemini' ? (
-          <div className="pt-2 border-t border-gray-100">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs text-gray-600">
-                <Key size={14} className="text-indigo-500" />
-                <span>
-                  สถานะ Gemini API Key:{' '}
-                  {apiKey ? (
-                    <span className="font-semibold text-emerald-600">พร้อมใช้งาน (บันทึกไว้แล้ว)</span>
-                  ) : (
-                    <span className="font-semibold text-amber-600">ยังไม่ได้ตั้งค่า</span>
-                  )}
-                </span>
-              </div>
+          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <Key size={14} className={hasApiKey ? 'text-emerald-600' : 'text-amber-500'} />
+              <span>สถานะ Gemini API Key:</span>
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold ${
+                  hasApiKey
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                }`}
+              >
+                {hasApiKey ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                <span>{hasApiKey ? 'มี API Key แล้ว' : 'ยังไม่มี API Key'}</span>
+              </span>
+            </div>
+            {onOpenApiKeySettings && (
               <button
                 type="button"
-                onClick={() => setShowKeyInput((v) => !v)}
+                onClick={onOpenApiKeySettings}
                 className="text-xs font-semibold text-indigo-600 hover:underline"
               >
-                {showKeyInput ? 'ซ่อนช่องใส่ Key' : 'ตั้งค่า / เปลี่ยน Key'}
+                {hasApiKey ? 'จัดการที่เมนูตั้งค่า API Key' : 'ไปตั้งค่า API Key'}
               </button>
-            </div>
-
-            {showKeyInput && (
-              <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={showKeyText ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="วาง Gemini API Key (AIza...) ใช้ร่วมกับเมนู ดึงข้อความ OCR"
-                    className="w-full pr-10 pl-3.5 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKeyText((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showKeyText ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveApiKey}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
-                >
-                  {keySaved ? <Check size={14} /> : <Key size={14} />}
-                  <span>{keySaved ? 'บันทึกแล้ว' : 'บันทึก Key'}</span>
-                </button>
-              </div>
             )}
           </div>
         ) : (

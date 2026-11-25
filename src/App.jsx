@@ -22,6 +22,7 @@ import {
 import PdfOrganizer from './tools/PdfOrganizer';
 import PdfProtect from './tools/PdfProtect';
 import PdfSearchable from './tools/PdfSearchable';
+import ApiKeySettings from './tools/ApiKeySettings';
 import BulkFolderCreator from './tools/BulkFolderCreator';
 import DuplicateFinder from './tools/DuplicateFinder';
 import BackgroundRemover from './tools/BackgroundRemover';
@@ -3307,20 +3308,9 @@ const QRCodeGenerator = () => {
 };
 
 // 5. Gemini OCR (Screen Capture + Electron Snipping Tool + Interactive Crop + Real API + PDF Support)
-const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
+const GeminiOCR = ({ pendingSnip, onClearPendingSnip, apiKey = '', onOpenApiKeySettings }) => {
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
-
-  const [apiKey, setApiKey] = useState(() => {
-    let key = localStorage.getItem('gemini_api_key');
-    if (key === 'AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk') {
-      localStorage.removeItem('gemini_api_key');
-      key = null;
-    }
-    return key || import.meta.env.VITE_GEMINI_API_KEY || '';
-  });
-  const [showKeyInput, setShowKeyInput] = useState(() => !apiKey);
-  const [showKeyText, setShowKeyText] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
+  const hasApiKey = Boolean(apiKey && apiKey.trim());
 
   // Desktop App Global Hotkey state
   const [hotkey, setHotkey] = useState(() => localStorage.getItem('ocr_global_hotkey') || 'CommandOrControl+Shift+X');
@@ -3394,18 +3384,6 @@ const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
 
   const formatHotkeyLabel = (hk) =>
     hk.replace('CommandOrControl', 'Ctrl').replace(/\+/g, ' + ');
-
-  const handleSaveApiKey = (newKey) => {
-    const trimmed = newKey.trim();
-    setApiKey(trimmed);
-    if (trimmed) {
-      localStorage.setItem('gemini_api_key', trimmed);
-    } else {
-      localStorage.removeItem('gemini_api_key');
-    }
-    setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2000);
-  };
 
   // Load a DataURL image into the workspace
   const loadWorkspaceImage = (dataUrl, label = 'รูปภาพ') => {
@@ -3678,9 +3656,8 @@ const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
 
   // Run Gemini OCR on either cropped region or full image
   const handleExtractText = async (overrideDataUrl = null, autoCopyResult = false) => {
-    if (!apiKey) {
-      setShowKeyInput(true);
-      setError('กรุณาใส่ Gemini API Key ด้านบนก่อนเริ่มดึงข้อความ');
+    if (!hasApiKey) {
+      setError('ยังไม่มี Gemini API Key กรุณาไปตั้งค่าที่เมนู "ตั้งค่า API Key" ด้านซ้ายก่อนเริ่มดึงข้อความ');
       return;
     }
     const targetDataUrl = overrideDataUrl || croppedPreview || image;
@@ -3818,65 +3795,20 @@ const GeminiOCR = ({ pendingSnip, onClearPendingSnip }) => {
           </div>
 
           <button
-            onClick={() => setShowKeyInput(!showKeyInput)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-all ${
-              apiKey
+            type="button"
+            onClick={() => onOpenApiKeySettings && onOpenApiKeySettings()}
+            title={hasApiKey ? 'คลิกเพื่อจัดการ API Key' : 'คลิกเพื่อไปตั้งค่า API Key'}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+              hasApiKey
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                 : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
             }`}
           >
-            <Key size={15} />
-            <span>{apiKey ? 'ตั้งค่า API Key แล้ว' : 'ใส่ Gemini API Key'}</span>
+            {hasApiKey ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+            <span>{hasApiKey ? 'มี API Key แล้ว' : 'ยังไม่มี API Key'}</span>
           </button>
         </div>
       </div>
-
-      {/* Collapsible API Key Bar */}
-      {showKeyInput && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 space-y-3 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
-              <Key size={14} className="text-indigo-600" />
-              Gemini API Key (บันทึกไว้ในเครื่องของคุณอัตโนมัติ)
-            </label>
-            <a
-              href="https://aistudio.google.com/app/apikey"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-indigo-600 hover:underline flex items-center gap-1"
-            >
-              <span>ขอรับฟรีที่ Google AI Studio</span>
-              <ExternalLink size={12} />
-            </a>
-          </div>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type={showKeyText ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => handleSaveApiKey(e.target.value)}
-                placeholder="วาง Gemini API Key ของคุณที่นี่ (AIzaSy...)"
-                className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKeyText(!showKeyText)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showKeyText ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowKeyInput(false)}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-xl transition-all flex items-center gap-1.5"
-            >
-              {keySaved ? <Check size={15} /> : null}
-              <span>พร้อมใช้งาน</span>
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Action Bar: 4 Capture / Input Methods */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -7798,6 +7730,26 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingSnip, setPendingSnip] = useState(null);
 
+  // Centralized Gemini API Key (shared across OCR & Searchable PDF tools)
+  const [geminiApiKey, setGeminiApiKey] = useState(() => {
+    let key = localStorage.getItem('gemini_api_key');
+    if (key === 'AIzaSyCtlgXxgZtDw3nC8j5k61ym2xknOg8Veyk') {
+      localStorage.removeItem('gemini_api_key');
+      key = null;
+    }
+    return key || import.meta.env.VITE_GEMINI_API_KEY || '';
+  });
+
+  const handleSaveGeminiApiKey = (newKey) => {
+    const trimmed = String(newKey || '').trim();
+    setGeminiApiKey(trimmed);
+    if (trimmed) {
+      localStorage.setItem('gemini_api_key', trimmed);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+  };
+
   // Download Toast & Unread Counter
   const [downloadToast, setDownloadToast] = useState(null);
   const [unreadDownloads, setUnreadDownloads] = useState(0);
@@ -7997,6 +7949,7 @@ const App = () => {
   const tools = [
     ...toolGroups.flatMap((g) => g.items),
     { id: 'downloads', label: 'ประวัติดาวน์โหลด', icon: History },
+    { id: 'api_keys', label: 'ตั้งค่า API Key', icon: Key },
   ];
 
   const [openGroups, setOpenGroups] = useState(() => {
@@ -8043,7 +7996,7 @@ const App = () => {
   // Track active tool label, auto-expand its group, & clear unread badge on opening Downloads tab
   useEffect(() => {
     const found = tools.find((t) => t.id === activeTab);
-    if (found && found.id !== 'downloads') {
+    if (found && found.id !== 'downloads' && found.id !== 'api_keys') {
       setCurrentDownloadSource(found.label);
     }
     if (activeTab === 'downloads') {
@@ -8136,8 +8089,8 @@ const App = () => {
                 );
               })}
 
-              {/* Standalone Download History Menu */}
-              <div className="pt-2 mt-2 border-t border-gray-100">
+              {/* Standalone Utility Menus: Download History & API Key Settings */}
+              <div className="pt-2 mt-2 border-t border-gray-100 space-y-1">
                 <button
                   type="button"
                   onClick={() => { setActiveTab('downloads'); setSidebarOpen(false); }}
@@ -8156,6 +8109,30 @@ const App = () => {
                       {unreadDownloads > 99 ? '99+' : unreadDownloads}
                     </span>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('api_keys'); setSidebarOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 ${
+                    activeTab === 'api_keys'
+                      ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <span className="flex items-center space-x-2.5 min-w-0">
+                    <Key size={18} className="shrink-0" />
+                    <span className="font-semibold text-sm truncate">ตั้งค่า API Key</span>
+                  </span>
+                  <span
+                    className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full shrink-0 ${
+                      geminiApiKey?.trim()
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    {geminiApiKey?.trim() ? 'มีแล้ว' : 'ยังไม่มี'}
+                  </span>
                 </button>
               </div>
             </nav>
@@ -8259,13 +8236,25 @@ const App = () => {
             {activeTab === 'compress_img' && <ImageStudio />}
             {activeTab === 'compress_pdf' && <PdfOptimizer />}
             {activeTab === 'qrcode' && <QRCodeGenerator />}
-            {activeTab === 'ocr' && <GeminiOCR pendingSnip={pendingSnip} onClearPendingSnip={() => setPendingSnip(null)} />}
+            {activeTab === 'ocr' && (
+              <GeminiOCR
+                pendingSnip={pendingSnip}
+                onClearPendingSnip={() => setPendingSnip(null)}
+                apiKey={geminiApiKey}
+                onOpenApiKeySettings={() => setActiveTab('api_keys')}
+              />
+            )}
             {activeTab === 'pdf_conv' && <PdfConverter />}
             {activeTab === 'pdf_merge' && <PdfMerger />}
             {activeTab === 'pdf_split' && <PdfSplitter />}
             {activeTab === 'pdf_organize' && <PdfOrganizer />}
             {activeTab === 'pdf_protect' && <PdfProtect />}
-            {activeTab === 'pdf_searchable' && <PdfSearchable />}
+            {activeTab === 'pdf_searchable' && (
+              <PdfSearchable
+                apiKey={geminiApiKey}
+                onOpenApiKeySettings={() => setActiveTab('api_keys')}
+              />
+            )}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
@@ -8273,6 +8262,12 @@ const App = () => {
             {activeTab === 'bulk_folders' && <BulkFolderCreator />}
             {activeTab === 'duplicate_finder' && <DuplicateFinder />}
             {activeTab === 'downloads' && <DownloadHistory />}
+            {activeTab === 'api_keys' && (
+              <ApiKeySettings
+                geminiApiKey={geminiApiKey}
+                onSaveGeminiApiKey={handleSaveGeminiApiKey}
+              />
+            )}
           </div>
         </div>
       </main>
