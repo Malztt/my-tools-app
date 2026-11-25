@@ -21,6 +21,7 @@ import {
 } from './downloadManager';
 import PdfOrganizer from './tools/PdfOrganizer';
 import PdfProtect from './tools/PdfProtect';
+import PdfSearchable from './tools/PdfSearchable';
 import BulkFolderCreator from './tools/BulkFolderCreator';
 import DuplicateFinder from './tools/DuplicateFinder';
 import BackgroundRemover from './tools/BackgroundRemover';
@@ -42,7 +43,7 @@ import {
   Wifi, User, Phone, Mail, Palette, Frame, ShieldCheck,
   RotateCw, FlipHorizontal, FlipVertical, Lock, Unlock, SlidersHorizontal, Layers,
   Folder, FolderOpen, FolderPlus, ArrowRight, Undo2, History, FileArchive, Clock, CheckCircle2,
-  Wand2, LayoutGrid
+  Wand2, LayoutGrid, FileSearch
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -7963,6 +7964,7 @@ const App = () => {
       id: 'pdf',
       label: 'จัดการ PDF',
       items: [
+        { id: 'pdf_searchable', label: 'ทำ PDF ค้นหาได้ (OCR)', icon: FileSearch },
         { id: 'pdf_watermark', label: 'ใส่ข้อความ PDF', icon: Type },
         { id: 'compress_pdf', label: 'บีบ PDF', icon: FileType },
         { id: 'pdf_merge', label: 'รวมไฟล์ PDF', icon: Files },
@@ -8263,6 +8265,7 @@ const App = () => {
             {activeTab === 'pdf_split' && <PdfSplitter />}
             {activeTab === 'pdf_organize' && <PdfOrganizer />}
             {activeTab === 'pdf_protect' && <PdfProtect />}
+            {activeTab === 'pdf_searchable' && <PdfSearchable />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
