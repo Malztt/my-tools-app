@@ -26,7 +26,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { downloadBlob } from '../downloadManager';
-import { segmentWithSamPoints, clearSamImageCache } from './samEngine';
+import { segmentWithSamPoints, autoSegmentImage, clearSamImageCache } from './samEngine';
 
 // Fast Onion-Peel + Harmonic Diffusion Inpainting on a cropped region around the mask
 // Runs offline in <100ms, smoothly fills solid/gradient/sky/wall/blurred backgrounds with zero seams
@@ -330,6 +330,8 @@ export default function MagicLayers() {
   const [samPoints, setSamPoints] = useState([]);
   const [samBusy, setSamBusy] = useState(false);
   const [samStatus, setSamStatus] = useState('');
+  const [autoSplitting, setAutoSplitting] = useState(false);
+  const [autoSplitProgress, setAutoSplitProgress] = useState({ percent: 0, text: '' });
   const [lassoPoints, setLassoPoints] = useState([]);
   const [selectionMask, setSelectionMask] = useState(null); // { mask, width, height }
 
@@ -554,7 +556,161 @@ export default function MagicLayers() {
     redrawCanvas();
   }, [redrawCanvas]);
 
-  // Load uploaded image into original & background canvases
+  // Cut a single mask out of origCanvas into a ready-to-render Layer object
+  const extractLayerFromMask = (orig, mask, mw, mh, name) =>
+    new Promise((resolve) => {
+      const W = orig.width;
+      const H = orig.height;
+
+      let minX = W;
+      let minY = H;
+      let maxX = -1;
+      let maxY = -1;
+      for (let y = 0; y < H; y++) {
+        const my = Math.min(mh - 1, Math.floor((y * mh) / H));
+        for (let x = 0; x < W; x++) {
+          const mx = Math.min(mw - 1, Math.floor((x * mw) / W));
+          if (mask[my * mw + mx]) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      if (maxX <= minX || maxY <= minY) {
+        resolve(null);
+        return;
+      }
+
+      const bw = maxX - minX + 1;
+      const bh = maxY - minY + 1;
+
+      const origData = orig.getContext('2d', { willReadFrequently: true }).getImageData(minX, minY, bw, bh);
+      const od = origData.data;
+      const cutCanvas = document.createElement('canvas');
+      cutCanvas.width = bw;
+      cutCanvas.height = bh;
+      const cutCtx = cutCanvas.getContext('2d');
+      const cutImgData = cutCtx.createImageData(bw, bh);
+      const cd = cutImgData.data;
+
+      for (let y = 0; y < bh; y++) {
+        const my = Math.min(mh - 1, Math.floor(((minY + y) * mh) / H));
+        for (let x = 0; x < bw; x++) {
+          const mx = Math.min(mw - 1, Math.floor(((minX + x) * mw) / W));
+          const p = (y * bw + x) * 4;
+          if (mask[my * mw + mx]) {
+            cd[p] = od[p];
+            cd[p + 1] = od[p + 1];
+            cd[p + 2] = od[p + 2];
+            cd[p + 3] = od[p + 3];
+          } else {
+            cd[p + 3] = 0;
+          }
+        }
+      }
+      cutCtx.putImageData(cutImgData, 0, 0);
+      const layerDataUrl = cutCanvas.toDataURL('image/png');
+
+      const layerImg = new Image();
+      layerImg.onload = () => {
+        const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        resolve({
+          id,
+          name,
+          dataUrl: layerDataUrl,
+          img: layerImg,
+          x: minX + bw / 2,
+          y: minY + bh / 2,
+          origX: minX + bw / 2,
+          origY: minY + bh / 2,
+          width: bw,
+          height: bh,
+          scale: 1,
+          rotation: 0,
+          flipX: false,
+          opacity: 1,
+          visible: true,
+        });
+      };
+      layerImg.onerror = () => resolve(null);
+      layerImg.src = layerDataUrl;
+    });
+
+  // Automatically segment & separate main elements into movable layers
+  const runAutoSplit = async (key, dataUrl, shouldInpaint = true) => {
+    if (!origCanvasRef.current || !bgCanvasRef.current || !dataUrl) return;
+    setAutoSplitting(true);
+    setError('');
+    setSelectionMask(null);
+    setSamPoints([]);
+    setLassoPoints([]);
+    setAutoSplitProgress({ percent: 5, text: 'กำลังเตรียม AI แยกชิ้นส่วนอัตโนมัติ...' });
+
+    try {
+      // Reset background canvas to clean original before auto-splitting
+      const orig = origCanvasRef.current;
+      const bg = bgCanvasRef.current;
+      const bgCtx = bg.getContext('2d');
+      bgCtx.clearRect(0, 0, bg.width, bg.height);
+      bgCtx.drawImage(orig, 0, 0);
+
+      const res = await autoSegmentImage(key, dataUrl, (p) => {
+        if (p?.stage === 'download') {
+          setAutoSplitProgress({
+            percent: Math.round((p.percent || 0) * 0.4),
+            text: `กำลังโหลดโมเดล SlimSAM (${p.percent || 0}%)...`,
+          });
+        } else if (p?.stage === 'encode') {
+          setAutoSplitProgress({ percent: 45, text: p.text || 'กำลังวิเคราะห์โครงสร้างภาพ...' });
+        } else if (p?.stage === 'segment') {
+          setAutoSplitProgress({
+            percent: 50 + Math.round((p.percent || 0) * 0.4),
+            text: p.text || 'กำลังแยกชิ้นส่วนองค์ประกอบ...',
+          });
+        }
+      });
+
+      const foundMasks = res?.masks || [];
+      if (foundMasks.length === 0) {
+        setTool('sam');
+        setError('ไม่พบชิ้นส่วนที่แยกอัตโนมัติได้ชัดเจน คุณสามารถใช้ "AI จิ้มเลือก" หรือ "Lasso" แยกเองได้ทันที');
+        return;
+      }
+
+      setAutoSplitProgress({ percent: 94, text: `กำลังสร้างเลเยอร์ ${foundMasks.length} ชิ้น และเติมพื้นหลัง...` });
+
+      layerCounterRef.current = 1;
+      const extracted = [];
+      for (const m of foundMasks) {
+        const name = `ชิ้นส่วน #${layerCounterRef.current++}`;
+        const layerObj = await extractLayerFromMask(orig, m.mask, m.width, m.height, name);
+        if (layerObj) {
+          extracted.push(layerObj);
+          if (shouldInpaint) {
+            inpaintBackgroundRegion(bg, m.mask, m.width, m.height, 3);
+          }
+        }
+      }
+
+      setLayers(extracted);
+      if (extracted.length > 0) {
+        setSelectedLayerId(extracted[extracted.length - 1].id);
+        setTool('move');
+      }
+    } catch (err) {
+      console.error(err);
+      setError(`แยกชิ้นส่วนอัตโนมัติไม่สำเร็จ: ${err?.message || 'ลองใช้ AI จิ้มเลือก หรือ Lasso แทนได้'}`);
+      setTool('sam');
+    } finally {
+      setAutoSplitting(false);
+      setAutoSplitProgress({ percent: 0, text: '' });
+    }
+  };
+
+  // Load uploaded image into original & background canvases, then auto-split immediately
   const loadImageFile = (file) => {
     if (!file || !file.type.startsWith('image/')) {
       setError('กรุณาเลือกไฟล์รูปภาพ (PNG, JPG, WebP)');
@@ -567,7 +723,7 @@ export default function MagicLayers() {
     setSamPoints([]);
     setSelectionMask(null);
     setLassoPoints([]);
-    setTool('sam');
+    setTool('move');
     setBgVisible(true);
     layerCounterRef.current = 1;
     clearSamImageCache();
@@ -593,9 +749,13 @@ export default function MagicLayers() {
         bg.getContext('2d').drawImage(img, 0, 0, w, h);
 
         const normalizedUrl = orig.toDataURL('image/png');
+        const nextKey = `${file.name}-${file.size}-${Date.now()}`;
         setSourceDataUrl(normalizedUrl);
-        setImageKey(`${file.name}-${file.size}-${Date.now()}`);
+        setImageKey(nextKey);
         setImgSize({ w, h });
+
+        // Immediately run automatic element separation!
+        runAutoSplit(nextKey, normalizedUrl, autoInpaintBg);
       };
       img.src = dataUrl;
     };
@@ -1008,7 +1168,7 @@ export default function MagicLayers() {
             <span>แยกชิ้นส่วนภาพ (Magic Layers)</span>
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            เก็บพื้นหลังเดิมไว้ครบ แล้วจิ้มแยกองค์ประกอบในภาพออกมาเป็นชิ้นๆ เพื่อขยับ ย่อ-ขยาย หมุน หรือสลับชั้นเหมือน Canva Magic Grab (ออฟไลน์ 100%)
+            อัปโหลดรูปแล้วระบบจะแยกองค์ประกอบในภาพออกมาเป็นชิ้นๆ ให้อัตโนมัติทันที พร้อมขยับ ย่อ-ขยาย หมุน โดยเก็บพื้นหลังเดิมไว้ครบ (ออฟไลน์ 100%)
           </p>
         </div>
 
@@ -1016,8 +1176,18 @@ export default function MagicLayers() {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
+              disabled={autoSplitting}
+              onClick={() => runAutoSplit(imageKey, sourceDataUrl, autoInpaintBg)}
+              className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs font-bold text-indigo-700 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Sparkles size={14} className={autoSplitting ? 'animate-spin' : ''} />
+              <span>แยกชิ้นอัตโนมัติใหม่</span>
+            </button>
+            <button
+              type="button"
+              disabled={autoSplitting}
               onClick={() => fileInputRef.current?.click()}
-              className="px-3.5 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 flex items-center gap-1.5 disabled:opacity-50"
             >
               <Upload size={14} />
               <span>เปลี่ยนรูป</span>
@@ -1070,7 +1240,7 @@ export default function MagicLayers() {
           </div>
           <p className="text-base font-bold text-gray-900">คลิกเลือก หรือลากรูปภาพมาวางที่นี่</p>
           <p className="text-xs text-gray-500 mt-1">
-            รองรับ PNG, JPG, WebP • จิ้มเลือกวัตถุด้วย SlimSAM AI หรือวง Lasso เพื่อแยกเป็น Layer ขยับได้ทันที
+            รองรับ PNG, JPG, WebP • อัปโหลดปุ๊บ AI แยกชิ้นส่วนเป็น Layer ขยับได้ให้อัตโนมัติทันที!
           </p>
         </div>
       ) : (
@@ -1082,45 +1252,14 @@ export default function MagicLayers() {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => {
-                    setTool('sam');
-                    setLassoPoints([]);
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                    tool === 'sam'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  <Crosshair size={14} />
-                  <span>AI จิ้มเลือกชิ้นส่วน</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTool('lasso');
-                    setSamPoints([]);
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                    tool === 'lasso'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  <Lasso size={14} />
-                  <span>วงเลือกเอง (Lasso)</span>
-                </button>
-
-                <button
-                  type="button"
+                  disabled={autoSplitting}
                   onClick={() => {
                     setTool('move');
                     setSelectionMask(null);
                     setSamPoints([]);
                     setLassoPoints([]);
                   }}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
                     tool === 'move'
                       ? 'bg-emerald-600 text-white shadow-sm'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -1128,6 +1267,40 @@ export default function MagicLayers() {
                 >
                   <Move size={14} />
                   <span>ขยับ / จัดวาง ({layers.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={autoSplitting}
+                  onClick={() => {
+                    setTool('sam');
+                    setLassoPoints([]);
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                    tool === 'sam'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Crosshair size={14} />
+                  <span>AI จิ้มแยกเพิ่ม</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={autoSplitting}
+                  onClick={() => {
+                    setTool('lasso');
+                    setSamPoints([]);
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                    tool === 'lasso'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Lasso size={14} />
+                  <span>วงเลือกเอง (Lasso)</span>
                 </button>
               </div>
 
@@ -1223,6 +1396,32 @@ export default function MagicLayers() {
                   tool === 'move' ? 'cursor-move' : 'cursor-crosshair'
                 }`}
               />
+
+              {/* Auto-Splitting Progress Overlay */}
+              {autoSplitting && (
+                <div className="absolute inset-0 bg-slate-900/55 backdrop-blur-[2px] flex items-center justify-center p-4 z-10">
+                  <div className="bg-white rounded-2xl p-5 shadow-2xl border border-gray-200 w-full max-w-sm space-y-3 text-center">
+                    <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                      <RefreshCw size={22} className="animate-spin" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-900">กำลังแยกองค์ประกอบอัตโนมัติ...</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {autoSplitProgress.text || 'กำลังประมวลผลด้วย SlimSAM AI'}
+                      </p>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-indigo-100 overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-600 transition-all duration-200"
+                        style={{ width: `${Math.max(6, autoSplitProgress.percent)}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-mono text-indigo-600 font-bold">
+                      {autoSplitProgress.percent}%
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
