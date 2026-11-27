@@ -10,25 +10,14 @@ import {
   AlertCircle,
   ShieldCheck,
   Zap,
-  Layers,
 } from 'lucide-react';
 
-export default function ApiKeySettings({
-  geminiApiKey,
-  onSaveGeminiApiKey,
-  hfToken = '',
-  onSaveHfToken,
-}) {
+export default function ApiKeySettings({ geminiApiKey, onSaveGeminiApiKey }) {
   const [inputKey, setInputKey] = useState(geminiApiKey || '');
   const [showKeyText, setShowKeyText] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
 
-  const [hfInput, setHfInput] = useState(hfToken || '');
-  const [showHfText, setShowHfText] = useState(false);
-  const [hfSavedNotice, setHfSavedNotice] = useState(false);
-
   const hasKey = Boolean(geminiApiKey && geminiApiKey.trim());
-  const hasHf = Boolean(hfToken && hfToken.trim());
 
   const handleSave = (e) => {
     e.preventDefault();
@@ -41,19 +30,6 @@ export default function ApiKeySettings({
     setInputKey('');
     onSaveGeminiApiKey('');
     setSavedNotice(false);
-  };
-
-  const handleSaveHf = (e) => {
-    e.preventDefault();
-    onSaveHfToken?.(hfInput.trim());
-    setHfSavedNotice(true);
-    setTimeout(() => setHfSavedNotice(false), 2500);
-  };
-
-  const handleClearHf = () => {
-    setHfInput('');
-    onSaveHfToken?.('');
-    setHfSavedNotice(false);
   };
 
   return (
@@ -149,6 +125,15 @@ export default function ApiKeySettings({
           </div>
         </form>
 
+        {/* Privacy note */}
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-600">
+          <ShieldCheck size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+          <span>
+            API Key จะถูกบันทึกไว้เฉพาะในเครื่องของคุณ (<code className="font-mono">localStorage</code>) ไม่มีการส่งไปยังเซิร์ฟเวอร์อื่นนอกจากเรียกใช้งาน Google Gemini API โดยตรง
+          </span>
+        </div>
+
+        {/* Tools using this key */}
         <div className="pt-2 border-t border-gray-100 space-y-2">
           <p className="text-xs font-semibold text-gray-700">ฟังก์ชันที่ใช้ Gemini API Key นี้:</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -158,108 +143,6 @@ export default function ApiKeySettings({
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Hugging Face Token Card (Optional — boosts free ZeroGPU quota for Qwen-Image-Layered) */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Layers size={20} />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-gray-900">Hugging Face Token (ไม่บังคับ — ฟรี)</h3>
-              <p className="text-xs text-gray-500">
-                เพิ่มโควตา GPU ฟรีสำหรับแยก Layer ภาพโปสเตอร์/กราฟิกด้วย Qwen-Image-Layered
-              </p>
-            </div>
-          </div>
-
-          <span
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
-              hasHf
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-gray-100 text-gray-600 border-gray-200'
-            }`}
-          >
-            {hasHf ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-            <span>{hasHf ? 'ตั้งค่าแล้ว (ได้โควตาเพิ่ม)' : 'ใช้โควตาสาธารณะ (ไม่ใส่ก็ได้)'}</span>
-          </span>
-        </div>
-
-        <form onSubmit={handleSaveHf} className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-gray-700">
-              กรอก Hugging Face Token (Read Token)
-            </label>
-            <a
-              href="https://huggingface.co/settings/tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium"
-            >
-              <span>สร้าง Token ฟรีที่ Hugging Face</span>
-              <ExternalLink size={12} />
-            </a>
-          </div>
-
-          <div className="relative">
-            <input
-              type={showHfText ? 'text' : 'password'}
-              value={hfInput}
-              onChange={(e) => setHfInput(e.target.value)}
-              placeholder="วาง Hugging Face Token ที่นี่ (hf_...)"
-              className="w-full pl-4 pr-11 py-2.5 text-sm rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none font-mono"
-            />
-            <button
-              type="button"
-              onClick={() => setShowHfText((v) => !v)}
-              title={showHfText ? 'ซ่อน Token' : 'แสดง Token'}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              {showHfText ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
-            >
-              {hfSavedNotice ? <Check size={15} /> : <Key size={15} />}
-              <span>{hfSavedNotice ? 'บันทึกเรียบร้อยแล้ว' : 'บันทึก HF Token'}</span>
-            </button>
-
-            {hasHf && (
-              <button
-                type="button"
-                onClick={handleClearHf}
-                className="px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-all flex items-center gap-1.5"
-              >
-                <Trash2 size={14} />
-                <span>ลบ Token ออก</span>
-              </button>
-            )}
-          </div>
-        </form>
-
-        <div className="pt-2 border-t border-gray-100 space-y-2">
-          <p className="text-xs font-semibold text-gray-700">ฟังก์ชันที่ใช้ Hugging Face Token นี้:</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-xs">
-              <Layers size={15} className="text-indigo-600 shrink-0" />
-              <span className="font-medium text-gray-800">แยกชิ้นส่วนภาพ (Magic)</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Privacy note */}
-      <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-600">
-        <ShieldCheck size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-        <span>
-          API Key / Token ทั้งหมดจะถูกบันทึกไว้เฉพาะในเครื่องของคุณ (<code className="font-mono">localStorage</code>) ไม่มีการส่งไปเก็บที่เซิร์ฟเวอร์อื่น
-        </span>
       </div>
     </div>
   );
