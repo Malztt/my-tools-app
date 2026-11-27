@@ -26,7 +26,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { downloadBlob } from '../downloadManager';
-import { segmentWithSamPoints, autoSegmentImage, clearSamImageCache } from './samEngine';
+import { segmentWithSamPoints, clearSamImageCache } from './samEngine';
 
 // Fast Onion-Peel + Harmonic Diffusion Inpainting on a cropped region around the mask
 // Runs offline in <100ms, smoothly fills solid/gradient/sky/wall/blurred backgrounds with zero seams
@@ -318,6 +318,186 @@ const rasterizePolygonMask = (points, width, height) => {
   return mask;
 };
 
+// Split an anti-aliased ISNet foreground canvas into clean, whole connected-component objects
+// Preserves original soft RGBA alpha edges and avoids slicing backgrounds or chopping objects into fragments
+const splitForegroundComponents = (fgCanvas, minAreaRatio = 0.0025, maxObjects = 12) => {
+  const W = fgCanvas.width;
+  const H = fgCanvas.height;
+  const ctx = fgCanvas.getContext('2d', { willReadFrequently: true });
+  const fgData = ctx.getImageData(0, 0, W, H).data;
+
+  // Work on a slightly downscaled grid (max 512px) for fast connected-component labeling with 2px bridge
+  const scale = Math.min(1, 512 / Math.max(W, H));
+  const sw = Math.max(8, Math.round(W * scale));
+  const sh = Math.max(8, Math.round(H * scale));
+  const smallSize = sw * sh;
+
+  const rawBin = new Uint8Array(smallSize);
+  for (let y = 0; y < sh; y++) {
+    const oy = Math.min(H - 1, Math.floor((y + 0.5) / scale));
+    for (let x = 0; x < sw; x++) {
+      const ox = Math.min(W - 1, Math.floor((x + 0.5) / scale));
+      if (fgData[(oy * W + ox) * 4 + 3] > 28) {
+        rawBin[y * sw + x] = 1;
+      }
+    }
+  }
+
+  // Dilate 2px on small grid to keep nearby detached details (e.g. hair strands, thin handles) attached to parent object
+  const bridged = new Uint8Array(smallSize);
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      if (!rawBin[y * sw + x]) continue;
+      for (let dy = -2; dy <= 2; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= sh) continue;
+        for (let dx = -2; dx <= 2; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= sw) continue;
+          bridged[yy * sw + xx] = 1;
+        }
+      }
+    }
+  }
+
+  // BFS Connected Components on bridged grid
+  const labels = new Int32Array(smallSize);
+  const components = [];
+  const queue = new Int32Array(smallSize);
+  let nextLabel = 1;
+
+  for (let i = 0; i < smallSize; i++) {
+    if (!bridged[i] || labels[i] !== 0) continue;
+    const label = nextLabel++;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = i;
+    labels[i] = label;
+
+    let rawArea = 0;
+    let minX = sw;
+    let minY = sh;
+    let maxX = 0;
+    let maxY = 0;
+
+    while (head < tail) {
+      const idx = queue[head++];
+      const x = idx % sw;
+      const y = (idx - x) / sw;
+      if (rawBin[idx]) {
+        rawArea++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+
+      if (x > 0 && bridged[idx - 1] && labels[idx - 1] === 0) {
+        labels[idx - 1] = label;
+        queue[tail++] = idx - 1;
+      }
+      if (x < sw - 1 && bridged[idx + 1] && labels[idx + 1] === 0) {
+        labels[idx + 1] = label;
+        queue[tail++] = idx + 1;
+      }
+      if (y > 0 && bridged[idx - sw] && labels[idx - sw] === 0) {
+        labels[idx - sw] = label;
+        queue[tail++] = idx - sw;
+      }
+      if (y < sh - 1 && bridged[idx + sw] && labels[idx + sw] === 0) {
+        labels[idx + sw] = label;
+        queue[tail++] = idx + sw;
+      }
+    }
+
+    if (rawArea / smallSize >= minAreaRatio && maxX >= minX && maxY >= minY) {
+      components.push({ label, rawArea, minX, minY, maxX, maxY });
+    }
+  }
+
+  // Sort largest-to-smallest and keep top maxObjects
+  components.sort((a, b) => b.rawArea - a.rawArea);
+  const kept = components.slice(0, maxObjects);
+
+  // Build union mask at full resolution for background inpainting
+  const unionMask = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    if (fgData[i * 4 + 3] > 20) unionMask[i] = 1;
+  }
+
+  // Extract each clean, anti-aliased component as its own tight PNG DataURL
+  const results = [];
+  for (const comp of kept) {
+    const pad = 4;
+    const x0 = Math.max(0, Math.floor(comp.minX / scale) - pad);
+    const y0 = Math.max(0, Math.floor(comp.minY / scale) - pad);
+    const x1 = Math.min(W - 1, Math.ceil((comp.maxX + 1) / scale) + pad);
+    const y1 = Math.min(H - 1, Math.ceil((comp.maxY + 1) / scale) + pad);
+    const bw = x1 - x0 + 1;
+    const bh = y1 - y0 + 1;
+    if (bw < 4 || bh < 4) continue;
+
+    const cutCanvas = document.createElement('canvas');
+    cutCanvas.width = bw;
+    cutCanvas.height = bh;
+    const cutCtx = cutCanvas.getContext('2d');
+    const outImg = cutCtx.createImageData(bw, bh);
+    const od = outImg.data;
+
+    let actualMinX = bw;
+    let actualMinY = bh;
+    let actualMaxX = -1;
+    let actualMaxY = -1;
+
+    for (let y = 0; y < bh; y++) {
+      const oy = y0 + y;
+      const sy = Math.min(sh - 1, Math.floor(oy * scale));
+      for (let x = 0; x < bw; x++) {
+        const ox = x0 + x;
+        const sx = Math.min(sw - 1, Math.floor(ox * scale));
+        if (labels[sy * sw + sx] === comp.label) {
+          const srcIdx = (oy * W + ox) * 4;
+          const a = fgData[srcIdx + 3];
+          if (a > 0) {
+            const dstIdx = (y * bw + x) * 4;
+            od[dstIdx] = fgData[srcIdx];
+            od[dstIdx + 1] = fgData[srcIdx + 1];
+            od[dstIdx + 2] = fgData[srcIdx + 2];
+            od[dstIdx + 3] = a;
+            if (a > 20) {
+              if (x < actualMinX) actualMinX = x;
+              if (x > actualMaxX) actualMaxX = x;
+              if (y < actualMinY) actualMinY = y;
+              if (y > actualMaxY) actualMaxY = y;
+            }
+          }
+        }
+      }
+    }
+
+    if (actualMaxX <= actualMinX || actualMaxY <= actualMinY) continue;
+    cutCtx.putImageData(outImg, 0, 0);
+
+    // Tight crop to actual non-transparent bounds
+    const tw = actualMaxX - actualMinX + 1;
+    const th = actualMaxY - actualMinY + 1;
+    const tightCanvas = document.createElement('canvas');
+    tightCanvas.width = tw;
+    tightCanvas.height = th;
+    tightCanvas.getContext('2d').drawImage(cutCanvas, actualMinX, actualMinY, tw, th, 0, 0, tw, th);
+
+    results.push({
+      dataUrl: tightCanvas.toDataURL('image/png'),
+      minX: x0 + actualMinX,
+      minY: y0 + actualMinY,
+      width: tw,
+      height: th,
+    });
+  }
+
+  return { components: results, unionMask, width: W, height: H };
+};
+
 export default function MagicLayers() {
   const [sourceFile, setSourceFile] = useState(null);
   const [sourceDataUrl, setSourceDataUrl] = useState('');
@@ -556,153 +736,119 @@ export default function MagicLayers() {
     redrawCanvas();
   }, [redrawCanvas]);
 
-  // Cut a single mask out of origCanvas into a ready-to-render Layer object
-  const extractLayerFromMask = (orig, mask, mw, mh, name) =>
+  // Helper to load a DataURL into an HTMLImageElement
+  const loadImageEl = (url) =>
     new Promise((resolve) => {
-      const W = orig.width;
-      const H = orig.height;
-
-      let minX = W;
-      let minY = H;
-      let maxX = -1;
-      let maxY = -1;
-      for (let y = 0; y < H; y++) {
-        const my = Math.min(mh - 1, Math.floor((y * mh) / H));
-        for (let x = 0; x < W; x++) {
-          const mx = Math.min(mw - 1, Math.floor((x * mw) / W));
-          if (mask[my * mw + mx]) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-
-      if (maxX <= minX || maxY <= minY) {
-        resolve(null);
-        return;
-      }
-
-      const bw = maxX - minX + 1;
-      const bh = maxY - minY + 1;
-
-      const origData = orig.getContext('2d', { willReadFrequently: true }).getImageData(minX, minY, bw, bh);
-      const od = origData.data;
-      const cutCanvas = document.createElement('canvas');
-      cutCanvas.width = bw;
-      cutCanvas.height = bh;
-      const cutCtx = cutCanvas.getContext('2d');
-      const cutImgData = cutCtx.createImageData(bw, bh);
-      const cd = cutImgData.data;
-
-      for (let y = 0; y < bh; y++) {
-        const my = Math.min(mh - 1, Math.floor(((minY + y) * mh) / H));
-        for (let x = 0; x < bw; x++) {
-          const mx = Math.min(mw - 1, Math.floor(((minX + x) * mw) / W));
-          const p = (y * bw + x) * 4;
-          if (mask[my * mw + mx]) {
-            cd[p] = od[p];
-            cd[p + 1] = od[p + 1];
-            cd[p + 2] = od[p + 2];
-            cd[p + 3] = od[p + 3];
-          } else {
-            cd[p + 3] = 0;
-          }
-        }
-      }
-      cutCtx.putImageData(cutImgData, 0, 0);
-      const layerDataUrl = cutCanvas.toDataURL('image/png');
-
-      const layerImg = new Image();
-      layerImg.onload = () => {
-        const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        resolve({
-          id,
-          name,
-          dataUrl: layerDataUrl,
-          img: layerImg,
-          x: minX + bw / 2,
-          y: minY + bh / 2,
-          origX: minX + bw / 2,
-          origY: minY + bh / 2,
-          width: bw,
-          height: bh,
-          scale: 1,
-          rotation: 0,
-          flipX: false,
-          opacity: 1,
-          visible: true,
-        });
-      };
-      layerImg.onerror = () => resolve(null);
-      layerImg.src = layerDataUrl;
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => resolve(null);
+      im.src = url;
     });
 
-  // Automatically segment & separate main elements into movable layers
-  const runAutoSplit = async (key, dataUrl, shouldInpaint = true) => {
+  // Automatically detect foreground subjects (ISNet AI) & split into clean whole movable layers
+  // Never slices backgrounds into random blobs and preserves smooth anti-aliased edges!
+  const runAutoSplit = async (_key, dataUrl, shouldInpaint = true) => {
     if (!origCanvasRef.current || !bgCanvasRef.current || !dataUrl) return;
     setAutoSplitting(true);
     setError('');
     setSelectionMask(null);
     setSamPoints([]);
     setLassoPoints([]);
-    setAutoSplitProgress({ percent: 5, text: 'กำลังเตรียม AI แยกชิ้นส่วนอัตโนมัติ...' });
+    setAutoSplitProgress({ percent: 8, text: 'กำลังเตรียมโมเดล AI (ISNet) แยกวัตถุหลัก...' });
 
     try {
-      // Reset background canvas to clean original before auto-splitting
       const orig = origCanvasRef.current;
       const bg = bgCanvasRef.current;
       const bgCtx = bg.getContext('2d');
       bgCtx.clearRect(0, 0, bg.width, bg.height);
       bgCtx.drawImage(orig, 0, 0);
 
-      const res = await autoSegmentImage(key, dataUrl, (p) => {
-        if (p?.stage === 'download') {
-          setAutoSplitProgress({
-            percent: Math.round((p.percent || 0) * 0.4),
-            text: `กำลังโหลดโมเดล SlimSAM (${p.percent || 0}%)...`,
-          });
-        } else if (p?.stage === 'encode') {
-          setAutoSplitProgress({ percent: 45, text: p.text || 'กำลังวิเคราะห์โครงสร้างภาพ...' });
-        } else if (p?.stage === 'segment') {
-          setAutoSplitProgress({
-            percent: 50 + Math.round((p.percent || 0) * 0.4),
-            text: p.text || 'กำลังแยกชิ้นส่วนองค์ประกอบ...',
-          });
-        }
+      // Convert normalized original canvas to PNG blob for ISNet
+      const srcBlob = await new Promise((resolve) => orig.toBlob(resolve, 'image/png'));
+      const { removeBackground } = await import('@imgly/background-removal');
+      const fgBlob = await removeBackground(srcBlob, {
+        model: 'isnet_fp16',
+        output: { format: 'image/png', quality: 1 },
+        progress: (stepKey, current, total) => {
+          if (total > 0) {
+            const pct = Math.min(99, Math.round((current / total) * 100));
+            if (String(stepKey).includes('fetch')) {
+              setAutoSplitProgress({
+                percent: Math.round(pct * 0.5),
+                text: `กำลังโหลดโมเดล AI (ISNet) ลงเครื่อง... ${pct}%`,
+              });
+            } else {
+              setAutoSplitProgress({
+                percent: 50 + Math.round(pct * 0.35),
+                text: `กำลังแยกวัตถุหลักออกจากพื้นหลัง... ${pct}%`,
+              });
+            }
+          }
+        },
       });
 
-      const foundMasks = res?.masks || [];
-      if (foundMasks.length === 0) {
+      setAutoSplitProgress({ percent: 88, text: 'กำลังแยกชิ้นส่วนแต่ละวัตถุเป็น Layer...' });
+
+      const fgUrl = URL.createObjectURL(fgBlob);
+      const fgImg = await loadImageEl(fgUrl);
+      URL.revokeObjectURL(fgUrl);
+      if (!fgImg) throw new Error('ไม่สามารถอ่านผลลัพธ์จาก AI ได้');
+
+      const fgCanvas = document.createElement('canvas');
+      fgCanvas.width = orig.width;
+      fgCanvas.height = orig.height;
+      fgCanvas.getContext('2d').drawImage(fgImg, 0, 0, orig.width, orig.height);
+
+      const { components, unionMask, width: mw, height: mh } = splitForegroundComponents(fgCanvas);
+
+      if (components.length === 0) {
         setTool('sam');
-        setError('ไม่พบชิ้นส่วนที่แยกอัตโนมัติได้ชัดเจน คุณสามารถใช้ "AI จิ้มเลือก" หรือ "Lasso" แยกเองได้ทันที');
+        setError('ไม่พบวัตถุหลักที่แยกอัตโนมัติได้ชัดเจน คุณสามารถใช้ "AI จิ้มแยกเพิ่ม" หรือ "Lasso" แยกเองได้ทันที');
         return;
       }
 
-      setAutoSplitProgress({ percent: 94, text: `กำลังสร้างเลเยอร์ ${foundMasks.length} ชิ้น และเติมพื้นหลัง...` });
+      setAutoSplitProgress({
+        percent: 94,
+        text: `พบ ${components.length} วัตถุหลัก กำลังสร้าง Layer และเติมพื้นหลัง...`,
+      });
 
       layerCounterRef.current = 1;
       const extracted = [];
-      for (const m of foundMasks) {
-        const name = `ชิ้นส่วน #${layerCounterRef.current++}`;
-        const layerObj = await extractLayerFromMask(orig, m.mask, m.width, m.height, name);
-        if (layerObj) {
-          extracted.push(layerObj);
-          if (shouldInpaint) {
-            inpaintBackgroundRegion(bg, m.mask, m.width, m.height, 3);
-          }
-        }
+      for (const comp of components) {
+        const layerImg = await loadImageEl(comp.dataUrl);
+        if (!layerImg) continue;
+        const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        extracted.push({
+          id,
+          name: `วัตถุ #${layerCounterRef.current++}`,
+          dataUrl: comp.dataUrl,
+          img: layerImg,
+          x: comp.minX + comp.width / 2,
+          y: comp.minY + comp.height / 2,
+          origX: comp.minX + comp.width / 2,
+          origY: comp.minY + comp.height / 2,
+          width: comp.width,
+          height: comp.height,
+          scale: 1,
+          rotation: 0,
+          flipX: false,
+          opacity: 1,
+          visible: true,
+        });
+      }
+
+      if (shouldInpaint && extracted.length > 0) {
+        inpaintBackgroundRegion(bg, unionMask, mw, mh, 4);
       }
 
       setLayers(extracted);
       if (extracted.length > 0) {
-        setSelectedLayerId(extracted[extracted.length - 1].id);
+        setSelectedLayerId(extracted[0].id);
         setTool('move');
       }
     } catch (err) {
       console.error(err);
-      setError(`แยกชิ้นส่วนอัตโนมัติไม่สำเร็จ: ${err?.message || 'ลองใช้ AI จิ้มเลือก หรือ Lasso แทนได้'}`);
+      setError(`แยกชิ้นส่วนอัตโนมัติไม่สำเร็จ: ${err?.message || 'ลองใช้ AI จิ้มแยกเพิ่ม หรือ Lasso แทนได้'}`);
       setTool('sam');
     } finally {
       setAutoSplitting(false);
