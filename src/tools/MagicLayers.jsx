@@ -668,14 +668,25 @@ export default function MagicLayers({ hfToken = '', onOpenApiKeySettings }) {
       const connectOpts = hfToken?.trim() ? { hf_token: hfToken.trim() } : undefined;
       const client = await Client.connect('Qwen/Qwen-Image-Layered', connectOpts);
 
+      // Dynamically resolve exact endpoint name (currently "/infer_1")
+      let endpointName = '/infer_1';
+      try {
+        const apiInfo = await client.view_api();
+        const namedKeys = Object.keys(apiInfo?.named_endpoints || {});
+        if (namedKeys.length > 0) endpointName = namedKeys[0];
+      } catch {
+        // fallback to /infer_1
+      }
+
       setAutoSplitProgress({
         percent: 32,
         text: `กำลังส่งภาพให้ Qwen-Image-Layered แยกเป็น ${layerCountOverride} ชั้น (ใช้เวลาประมาณ 30–60 วินาที)...`,
       });
 
-      const result = await client.predict('/infer', {
-        input_image: srcBlob,
-        seed: 777,
+      const inputFile = new File([srcBlob], 'input.png', { type: 'image/png' });
+      const result = await client.predict(endpointName, {
+        input_image: inputFile,
+        seed: 0,
         randomize_seed: true,
         prompt: '',
         neg_prompt: ' ',
