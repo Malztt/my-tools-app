@@ -26,6 +26,7 @@ import ApiKeySettings from './tools/ApiKeySettings';
 import BulkFolderCreator from './tools/BulkFolderCreator';
 import DuplicateFinder from './tools/DuplicateFinder';
 import BackgroundRemover from './tools/BackgroundRemover';
+import MagicLayers from './tools/MagicLayers';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -7910,6 +7911,7 @@ const App = () => {
       items: [
         { id: 'ocr', label: 'ดึงข้อความ OCR', icon: Zap },
         { id: 'bg_remover', label: 'ลบพื้นหลังรูปภาพ', icon: Wand2 },
+        { id: 'magic_layers', label: 'แยกชิ้นส่วนภาพ (Magic)', icon: Layers },
       ],
     },
     {
@@ -8252,6 +8254,7 @@ const App = () => {
             {activeTab === 'pdf_searchable' && <PdfSearchable />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
+            {activeTab === 'magic_layers' && <MagicLayers />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
             {activeTab === 'bulk_rename' && <BulkRenamer />}
             {activeTab === 'bulk_folders' && <BulkFolderCreator />}
