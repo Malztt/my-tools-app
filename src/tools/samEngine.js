@@ -164,9 +164,9 @@ export const segmentWithSamPoints = async (imageKey, dataUrl, points, onProgress
 };
 
 // Automatic multi-object segmentation ("Magic Layers" / Canva Magic Grab auto-split)
-// Encodes image ONCE, then decodes a 4x4 grid of prompt points (~1s total) with IoU filtering & NMS deduplication.
+// Encodes image ONCE, then decodes a 5x5 full-image grid of prompt points with IoU filtering & NMS deduplication.
 export const autoSegmentImage = async (imageKey, dataUrl, onProgress, options = {}) => {
-  const { gridSize = 4, minAreaRatio = 0.006, maxAreaRatio = 0.62, minIou = 0.70, maxObjects = 8 } = options;
+  const { gridSize = 5, minAreaRatio = 0.003, maxAreaRatio = 0.68, minIou = 0.65, maxObjects = 16 } = options;
 
   await prepareSamImage(imageKey, dataUrl, onProgress);
   const { model, processor } = await loadSamModel();
@@ -175,12 +175,12 @@ export const autoSegmentImage = async (imageKey, dataUrl, onProgress, options = 
   const imgH = cachedRawImage.height;
   const totalPixels = imgW * imgH;
 
-  // Build evenly spaced interior grid points (avoid extreme edges)
+  // Build evenly spaced full-image grid points (8%..92% so elements near borders are also captured)
   const gridPoints = [];
   for (let gy = 0; gy < gridSize; gy++) {
-    const ny = 0.14 + (gy / Math.max(1, gridSize - 1)) * 0.72;
+    const ny = 0.08 + (gy / Math.max(1, gridSize - 1)) * 0.84;
     for (let gx = 0; gx < gridSize; gx++) {
-      const nx = 0.14 + (gx / Math.max(1, gridSize - 1)) * 0.72;
+      const nx = 0.08 + (gx / Math.max(1, gridSize - 1)) * 0.84;
       gridPoints.push({ x: Math.round(nx * imgW), y: Math.round(ny * imgH) });
     }
   }
