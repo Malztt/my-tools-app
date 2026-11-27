@@ -7751,6 +7751,19 @@ const App = () => {
     }
   };
 
+  // Optional Hugging Face Token (boosts free ZeroGPU quota for Qwen-Image-Layered)
+  const [hfToken, setHfToken] = useState(() => localStorage.getItem('hf_api_token') || '');
+
+  const handleSaveHfToken = (newToken) => {
+    const trimmed = String(newToken || '').trim();
+    setHfToken(trimmed);
+    if (trimmed) {
+      localStorage.setItem('hf_api_token', trimmed);
+    } else {
+      localStorage.removeItem('hf_api_token');
+    }
+  };
+
   // Download Toast & Unread Counter
   const [downloadToast, setDownloadToast] = useState(null);
   const [unreadDownloads, setUnreadDownloads] = useState(0);
@@ -8254,7 +8267,12 @@ const App = () => {
             {activeTab === 'pdf_searchable' && <PdfSearchable />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
-            {activeTab === 'magic_layers' && <MagicLayers />}
+            {activeTab === 'magic_layers' && (
+              <MagicLayers
+                hfToken={hfToken}
+                onOpenApiKeySettings={() => setActiveTab('api_keys')}
+              />
+            )}
             {activeTab === 'xls_conv' && <ExcelConverter />}
             {activeTab === 'bulk_rename' && <BulkRenamer />}
             {activeTab === 'bulk_folders' && <BulkFolderCreator />}
@@ -8264,6 +8282,8 @@ const App = () => {
               <ApiKeySettings
                 geminiApiKey={geminiApiKey}
                 onSaveGeminiApiKey={handleSaveGeminiApiKey}
+                hfToken={hfToken}
+                onSaveHfToken={handleSaveHfToken}
               />
             )}
           </div>

@@ -24,6 +24,8 @@ import {
   FileArchive,
   X,
   Plus,
+  Key,
+  CheckCircle2,
 } from 'lucide-react';
 import { downloadBlob } from '../downloadManager';
 import { segmentWithSamPoints, clearSamImageCache } from './samEngine';
@@ -318,194 +320,68 @@ const rasterizePolygonMask = (points, width, height) => {
   return mask;
 };
 
-// Split an anti-aliased ISNet foreground canvas into clean, whole connected-component objects
-// Preserves original soft RGBA alpha edges and avoids slicing backgrounds or chopping objects into fragments
-const splitForegroundComponents = (fgCanvas, minAreaRatio = 0.0025, maxObjects = 12) => {
-  const W = fgCanvas.width;
-  const H = fgCanvas.height;
-  const ctx = fgCanvas.getContext('2d', { willReadFrequently: true });
-  const fgData = ctx.getImageData(0, 0, W, H).data;
+// Tight-crop a full-frame RGBA layer returned by Qwen-Image-Layered to its visible non-transparent bounds
+const tightCropRgbaLayer = (imgEl, targetW, targetH) => {
+  const full = document.createElement('canvas');
+  full.width = targetW;
+  full.height = targetH;
+  const fctx = full.getContext('2d', { willReadFrequently: true });
+  fctx.drawImage(imgEl, 0, 0, targetW, targetH);
+  const data = fctx.getImageData(0, 0, targetW, targetH).data;
 
-  // Work on a slightly downscaled grid (max 512px) for fast connected-component labeling with 2px bridge
-  const scale = Math.min(1, 512 / Math.max(W, H));
-  const sw = Math.max(8, Math.round(W * scale));
-  const sh = Math.max(8, Math.round(H * scale));
-  const smallSize = sw * sh;
+  let minX = targetW;
+  let minY = targetH;
+  let maxX = -1;
+  let maxY = -1;
+  let visiblePixels = 0;
 
-  const rawBin = new Uint8Array(smallSize);
-  for (let y = 0; y < sh; y++) {
-    const oy = Math.min(H - 1, Math.floor((y + 0.5) / scale));
-    for (let x = 0; x < sw; x++) {
-      const ox = Math.min(W - 1, Math.floor((x + 0.5) / scale));
-      if (fgData[(oy * W + ox) * 4 + 3] > 28) {
-        rawBin[y * sw + x] = 1;
-      }
-    }
-  }
-
-  // Dilate 2px on small grid to keep nearby detached details (e.g. hair strands, thin handles) attached to parent object
-  const bridged = new Uint8Array(smallSize);
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      if (!rawBin[y * sw + x]) continue;
-      for (let dy = -2; dy <= 2; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= sh) continue;
-        for (let dx = -2; dx <= 2; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= sw) continue;
-          bridged[yy * sw + xx] = 1;
-        }
-      }
-    }
-  }
-
-  // BFS Connected Components on bridged grid
-  const labels = new Int32Array(smallSize);
-  const components = [];
-  const queue = new Int32Array(smallSize);
-  let nextLabel = 1;
-
-  for (let i = 0; i < smallSize; i++) {
-    if (!bridged[i] || labels[i] !== 0) continue;
-    const label = nextLabel++;
-    let head = 0;
-    let tail = 0;
-    queue[tail++] = i;
-    labels[i] = label;
-
-    let rawArea = 0;
-    let minX = sw;
-    let minY = sh;
-    let maxX = 0;
-    let maxY = 0;
-
-    while (head < tail) {
-      const idx = queue[head++];
-      const x = idx % sw;
-      const y = (idx - x) / sw;
-      if (rawBin[idx]) {
-        rawArea++;
+  for (let y = 0; y < targetH; y++) {
+    for (let x = 0; x < targetW; x++) {
+      const a = data[(y * targetW + x) * 4 + 3];
+      if (a > 16) {
+        visiblePixels++;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-
-      if (x > 0 && bridged[idx - 1] && labels[idx - 1] === 0) {
-        labels[idx - 1] = label;
-        queue[tail++] = idx - 1;
-      }
-      if (x < sw - 1 && bridged[idx + 1] && labels[idx + 1] === 0) {
-        labels[idx + 1] = label;
-        queue[tail++] = idx + 1;
-      }
-      if (y > 0 && bridged[idx - sw] && labels[idx - sw] === 0) {
-        labels[idx - sw] = label;
-        queue[tail++] = idx - sw;
-      }
-      if (y < sh - 1 && bridged[idx + sw] && labels[idx + sw] === 0) {
-        labels[idx + sw] = label;
-        queue[tail++] = idx + sw;
-      }
-    }
-
-    if (rawArea / smallSize >= minAreaRatio && maxX >= minX && maxY >= minY) {
-      components.push({ label, rawArea, minX, minY, maxX, maxY });
     }
   }
 
-  // Sort largest-to-smallest and keep top maxObjects
-  components.sort((a, b) => b.rawArea - a.rawArea);
-  const kept = components.slice(0, maxObjects);
+  // Skip completely empty/blank layers
+  if (visiblePixels < 25 || maxX <= minX || maxY <= minY) return null;
 
-  // Build union mask at full resolution for background inpainting
-  const unionMask = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) {
-    if (fgData[i * 4 + 3] > 20) unionMask[i] = 1;
-  }
+  const pad = 2;
+  const x0 = Math.max(0, minX - pad);
+  const y0 = Math.max(0, minY - pad);
+  const x1 = Math.min(targetW - 1, maxX + pad);
+  const y1 = Math.min(targetH - 1, maxY + pad);
+  const tw = x1 - x0 + 1;
+  const th = y1 - y0 + 1;
 
-  // Extract each clean, anti-aliased component as its own tight PNG DataURL
-  const results = [];
-  for (const comp of kept) {
-    const pad = 4;
-    const x0 = Math.max(0, Math.floor(comp.minX / scale) - pad);
-    const y0 = Math.max(0, Math.floor(comp.minY / scale) - pad);
-    const x1 = Math.min(W - 1, Math.ceil((comp.maxX + 1) / scale) + pad);
-    const y1 = Math.min(H - 1, Math.ceil((comp.maxY + 1) / scale) + pad);
-    const bw = x1 - x0 + 1;
-    const bh = y1 - y0 + 1;
-    if (bw < 4 || bh < 4) continue;
+  const cropped = document.createElement('canvas');
+  cropped.width = tw;
+  cropped.height = th;
+  cropped.getContext('2d').drawImage(full, x0, y0, tw, th, 0, 0, tw, th);
 
-    const cutCanvas = document.createElement('canvas');
-    cutCanvas.width = bw;
-    cutCanvas.height = bh;
-    const cutCtx = cutCanvas.getContext('2d');
-    const outImg = cutCtx.createImageData(bw, bh);
-    const od = outImg.data;
-
-    let actualMinX = bw;
-    let actualMinY = bh;
-    let actualMaxX = -1;
-    let actualMaxY = -1;
-
-    for (let y = 0; y < bh; y++) {
-      const oy = y0 + y;
-      const sy = Math.min(sh - 1, Math.floor(oy * scale));
-      for (let x = 0; x < bw; x++) {
-        const ox = x0 + x;
-        const sx = Math.min(sw - 1, Math.floor(ox * scale));
-        if (labels[sy * sw + sx] === comp.label) {
-          const srcIdx = (oy * W + ox) * 4;
-          const a = fgData[srcIdx + 3];
-          if (a > 0) {
-            const dstIdx = (y * bw + x) * 4;
-            od[dstIdx] = fgData[srcIdx];
-            od[dstIdx + 1] = fgData[srcIdx + 1];
-            od[dstIdx + 2] = fgData[srcIdx + 2];
-            od[dstIdx + 3] = a;
-            if (a > 20) {
-              if (x < actualMinX) actualMinX = x;
-              if (x > actualMaxX) actualMaxX = x;
-              if (y < actualMinY) actualMinY = y;
-              if (y > actualMaxY) actualMaxY = y;
-            }
-          }
-        }
-      }
-    }
-
-    if (actualMaxX <= actualMinX || actualMaxY <= actualMinY) continue;
-    cutCtx.putImageData(outImg, 0, 0);
-
-    // Tight crop to actual non-transparent bounds
-    const tw = actualMaxX - actualMinX + 1;
-    const th = actualMaxY - actualMinY + 1;
-    const tightCanvas = document.createElement('canvas');
-    tightCanvas.width = tw;
-    tightCanvas.height = th;
-    tightCanvas.getContext('2d').drawImage(cutCanvas, actualMinX, actualMinY, tw, th, 0, 0, tw, th);
-
-    results.push({
-      dataUrl: tightCanvas.toDataURL('image/png'),
-      minX: x0 + actualMinX,
-      minY: y0 + actualMinY,
-      width: tw,
-      height: th,
-    });
-  }
-
-  return { components: results, unionMask, width: W, height: H };
+  return {
+    dataUrl: cropped.toDataURL('image/png'),
+    minX: x0,
+    minY: y0,
+    width: tw,
+    height: th,
+  };
 };
 
-export default function MagicLayers() {
+export default function MagicLayers({ hfToken = '', onOpenApiKeySettings }) {
   const [sourceFile, setSourceFile] = useState(null);
   const [sourceDataUrl, setSourceDataUrl] = useState('');
   const [imageKey, setImageKey] = useState('');
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+  const [targetLayerCount, setTargetLayerCount] = useState(4);
 
   // Editor Modes: 'sam' (AI Click Select) | 'lasso' (Freehand Select) | 'move' (Move/Resize/Rotate Layers)
-  const [tool, setTool] = useState('sam');
+  const [tool, setTool] = useState('move');
   const [samPointMode, setSamPointMode] = useState(1); // 1 = include (+), 0 = exclude (-)
   const [samPoints, setSamPoints] = useState([]);
   const [samBusy, setSamBusy] = useState(false);
@@ -514,6 +390,8 @@ export default function MagicLayers() {
   const [autoSplitProgress, setAutoSplitProgress] = useState({ percent: 0, text: '' });
   const [lassoPoints, setLassoPoints] = useState([]);
   const [selectionMask, setSelectionMask] = useState(null); // { mask, width, height }
+
+  const hasHfToken = Boolean(hfToken && hfToken.trim());
 
   // Fill behind grabbed object: true = auto inpaint, false = keep original background untouched (duplicate grab)
   const [autoInpaintBg, setAutoInpaintBg] = useState(true);
@@ -736,25 +614,40 @@ export default function MagicLayers() {
     redrawCanvas();
   }, [redrawCanvas]);
 
-  // Helper to load a DataURL into an HTMLImageElement
-  const loadImageEl = (url) =>
-    new Promise((resolve) => {
+  // Helper to load a URL or DataURL into an HTMLImageElement (CORS-safe via fetch->blob when remote)
+  const loadImageEl = async (url) => {
+    let targetUrl = url;
+    let revoke = false;
+    if (/^https?:\/\//i.test(url)) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`โหลดภาพเลเยอร์ไม่สำเร็จ (HTTP ${res.status})`);
+      const blob = await res.blob();
+      targetUrl = URL.createObjectURL(blob);
+      revoke = true;
+    }
+    return new Promise((resolve) => {
       const im = new Image();
-      im.onload = () => resolve(im);
-      im.onerror = () => resolve(null);
-      im.src = url;
+      im.onload = () => {
+        if (revoke) URL.revokeObjectURL(targetUrl);
+        resolve(im);
+      };
+      im.onerror = () => {
+        if (revoke) URL.revokeObjectURL(targetUrl);
+        resolve(null);
+      };
+      im.src = targetUrl;
     });
+  };
 
-  // Automatically detect foreground subjects (ISNet AI) & split into clean whole movable layers
-  // Never slices backgrounds into random blobs and preserves smooth anti-aliased edges!
-  const runAutoSplit = async (_key, dataUrl, shouldInpaint = true) => {
+  // Automatically decompose poster/graphic/photo into RGBA Layers using Qwen/Qwen-Image-Layered (Hugging Face Free ZeroGPU)
+  const runAutoSplit = async (_key, dataUrl, layerCountOverride = targetLayerCount) => {
     if (!origCanvasRef.current || !bgCanvasRef.current || !dataUrl) return;
     setAutoSplitting(true);
     setError('');
     setSelectionMask(null);
     setSamPoints([]);
     setLassoPoints([]);
-    setAutoSplitProgress({ percent: 8, text: 'กำลังเตรียมโมเดล AI (ISNet) แยกวัตถุหลัก...' });
+    setAutoSplitProgress({ percent: 10, text: 'กำลังเชื่อมต่อ Qwen-Image-Layered (Hugging Face Free GPU)...' });
 
     try {
       const orig = origCanvasRef.current;
@@ -763,72 +656,90 @@ export default function MagicLayers() {
       bgCtx.clearRect(0, 0, bg.width, bg.height);
       bgCtx.drawImage(orig, 0, 0);
 
-      // Convert normalized original canvas to PNG blob for ISNet
-      const srcBlob = await new Promise((resolve) => orig.toBlob(resolve, 'image/png'));
-      const { removeBackground } = await import('@imgly/background-removal');
-      const fgBlob = await removeBackground(srcBlob, {
-        model: 'isnet_fp16',
-        output: { format: 'image/png', quality: 1 },
-        progress: (stepKey, current, total) => {
-          if (total > 0) {
-            const pct = Math.min(99, Math.round((current / total) * 100));
-            if (String(stepKey).includes('fetch')) {
-              setAutoSplitProgress({
-                percent: Math.round(pct * 0.5),
-                text: `กำลังโหลดโมเดล AI (ISNet) ลงเครื่อง... ${pct}%`,
-              });
-            } else {
-              setAutoSplitProgress({
-                percent: 50 + Math.round(pct * 0.35),
-                text: `กำลังแยกวัตถุหลักออกจากพื้นหลัง... ${pct}%`,
-              });
-            }
-          }
-        },
+      // Prepare crisp PNG blob (cap at 1024px max side for fast upload & optimal Qwen inference)
+      const uploadScale = Math.min(1, 1024 / Math.max(orig.width, orig.height));
+      const upCanvas = document.createElement('canvas');
+      upCanvas.width = Math.max(64, Math.round(orig.width * uploadScale));
+      upCanvas.height = Math.max(64, Math.round(orig.height * uploadScale));
+      upCanvas.getContext('2d').drawImage(orig, 0, 0, upCanvas.width, upCanvas.height);
+      const srcBlob = await new Promise((resolve) => upCanvas.toBlob(resolve, 'image/png'));
+
+      const { Client } = await import('@gradio/client');
+      const connectOpts = hfToken?.trim() ? { hf_token: hfToken.trim() } : undefined;
+      const client = await Client.connect('Qwen/Qwen-Image-Layered', connectOpts);
+
+      setAutoSplitProgress({
+        percent: 32,
+        text: `กำลังส่งภาพให้ Qwen-Image-Layered แยกเป็น ${layerCountOverride} ชั้น (ใช้เวลาประมาณ 30–60 วินาที)...`,
       });
 
-      setAutoSplitProgress({ percent: 88, text: 'กำลังแยกชิ้นส่วนแต่ละวัตถุเป็น Layer...' });
+      const result = await client.predict('/infer', {
+        input_image: srcBlob,
+        seed: 777,
+        randomize_seed: true,
+        prompt: '',
+        neg_prompt: ' ',
+        true_guidance_scale: 4.0,
+        num_inference_steps: 32,
+        layer: Number(layerCountOverride) || 4,
+        cfg_norm: true,
+        use_en_prompt: true,
+      });
 
-      const fgUrl = URL.createObjectURL(fgBlob);
-      const fgImg = await loadImageEl(fgUrl);
-      URL.revokeObjectURL(fgUrl);
-      if (!fgImg) throw new Error('ไม่สามารถอ่านผลลัพธ์จาก AI ได้');
-
-      const fgCanvas = document.createElement('canvas');
-      fgCanvas.width = orig.width;
-      fgCanvas.height = orig.height;
-      fgCanvas.getContext('2d').drawImage(fgImg, 0, 0, orig.width, orig.height);
-
-      const { components, unionMask, width: mw, height: mh } = splitForegroundComponents(fgCanvas);
-
-      if (components.length === 0) {
-        setTool('sam');
-        setError('ไม่พบวัตถุหลักที่แยกอัตโนมัติได้ชัดเจน คุณสามารถใช้ "AI จิ้มแยกเพิ่ม" หรือ "Lasso" แยกเองได้ทันที');
-        return;
+      const gallery = Array.isArray(result?.data?.[0]) ? result.data[0] : [];
+      if (gallery.length === 0) {
+        throw new Error('ไม่พบข้อมูลเลเยอร์ที่ส่งกลับมาจาก Qwen-Image-Layered');
       }
 
       setAutoSplitProgress({
-        percent: 94,
-        text: `พบ ${components.length} วัตถุหลัก กำลังสร้าง Layer และเติมพื้นหลัง...`,
+        percent: 82,
+        text: `ได้รับ ${gallery.length} เลเยอร์แล้ว กำลังจัดเตรียมลง Canvas...`,
       });
 
+      // Extract image URLs from Gradio gallery items (ordered background -> foreground)
+      const layerUrls = gallery
+        .map((item) => item?.image?.url || item?.url || (typeof item === 'string' ? item : null))
+        .filter(Boolean);
+
+      if (layerUrls.length === 0) {
+        throw new Error('ไม่สามารถอ่าน URL ของภาพเลเยอร์ได้');
+      }
+
+      // Layer 0 = reconstructed clean background layer
+      const bgLayerImg = await loadImageEl(layerUrls[0]);
+      if (bgLayerImg) {
+        bgCtx.clearRect(0, 0, bg.width, bg.height);
+        bgCtx.drawImage(bgLayerImg, 0, 0, bg.width, bg.height);
+      }
+
+      // Layers 1..N = foreground graphics, text, logos, icons, objects
       layerCounterRef.current = 1;
       const extracted = [];
-      for (const comp of components) {
-        const layerImg = await loadImageEl(comp.dataUrl);
+      for (let i = 1; i < layerUrls.length; i++) {
+        setAutoSplitProgress({
+          percent: 82 + Math.round((i / Math.max(1, layerUrls.length - 1)) * 16),
+          text: `กำลังโหลดและครอปเลเยอร์ที่ ${i}/${layerUrls.length - 1}...`,
+        });
+
+        const rawImg = await loadImageEl(layerUrls[i]);
+        if (!rawImg) continue;
+        const cropped = tightCropRgbaLayer(rawImg, orig.width, orig.height);
+        if (!cropped) continue;
+        const layerImg = await loadImageEl(cropped.dataUrl);
         if (!layerImg) continue;
-        const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        const id = `layer-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
         extracted.push({
           id,
-          name: `วัตถุ #${layerCounterRef.current++}`,
-          dataUrl: comp.dataUrl,
+          name: `เลเยอร์ #${layerCounterRef.current++}`,
+          dataUrl: cropped.dataUrl,
           img: layerImg,
-          x: comp.minX + comp.width / 2,
-          y: comp.minY + comp.height / 2,
-          origX: comp.minX + comp.width / 2,
-          origY: comp.minY + comp.height / 2,
-          width: comp.width,
-          height: comp.height,
+          x: cropped.minX + cropped.width / 2,
+          y: cropped.minY + cropped.height / 2,
+          origX: cropped.minX + cropped.width / 2,
+          origY: cropped.minY + cropped.height / 2,
+          width: cropped.width,
+          height: cropped.height,
           scale: 1,
           rotation: 0,
           flipX: false,
@@ -837,18 +748,21 @@ export default function MagicLayers() {
         });
       }
 
-      if (shouldInpaint && extracted.length > 0) {
-        inpaintBackgroundRegion(bg, unionMask, mw, mh, 4);
-      }
-
       setLayers(extracted);
       if (extracted.length > 0) {
-        setSelectedLayerId(extracted[0].id);
+        setSelectedLayerId(extracted[extracted.length - 1].id);
         setTool('move');
       }
     } catch (err) {
       console.error(err);
-      setError(`แยกชิ้นส่วนอัตโนมัติไม่สำเร็จ: ${err?.message || 'ลองใช้ AI จิ้มแยกเพิ่ม หรือ Lasso แทนได้'}`);
+      const rawMsg = String(err?.message || '');
+      if (rawMsg.toLowerCase().includes('quota') || rawMsg.toLowerCase().includes('zerogpu')) {
+        setError(
+          'โควตาฟรี Hugging Face ZeroGPU ชั่วคราวเต็ม แนะนำใส่ Hugging Face Token ฟรีที่เมนู "ตั้งค่า API Key" เพื่อเพิ่มโควตา หรือใช้เครื่องมือ "AI จิ้มแยกเพิ่ม" / "Lasso" แทนได้ทันที'
+        );
+      } else {
+        setError(`แยก Layer ด้วย Qwen AI ไม่สำเร็จ: ${rawMsg || 'ลองกดใหม่อีกครั้ง หรือใช้ AI จิ้มแยกเพิ่ม / Lasso แทนได้'}`);
+      }
       setTool('sam');
     } finally {
       setAutoSplitting(false);
@@ -900,8 +814,8 @@ export default function MagicLayers() {
         setImageKey(nextKey);
         setImgSize({ w, h });
 
-        // Immediately run automatic element separation!
-        runAutoSplit(nextKey, normalizedUrl, autoInpaintBg);
+        // Immediately run Qwen-Image-Layered automatic decomposition!
+        runAutoSplit(nextKey, normalizedUrl, targetLayerCount);
       };
       img.src = dataUrl;
     };
@@ -1323,11 +1237,11 @@ export default function MagicLayers() {
             <button
               type="button"
               disabled={autoSplitting}
-              onClick={() => runAutoSplit(imageKey, sourceDataUrl, autoInpaintBg)}
+              onClick={() => runAutoSplit(imageKey, sourceDataUrl, targetLayerCount)}
               className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs font-bold text-indigo-700 flex items-center gap-1.5 disabled:opacity-50"
             >
               <Sparkles size={14} className={autoSplitting ? 'animate-spin' : ''} />
-              <span>แยกชิ้นอัตโนมัติใหม่</span>
+              <span>แยก Layer ใหม่ ({targetLayerCount} ชั้น)</span>
             </button>
             <button
               type="button"
@@ -1356,6 +1270,64 @@ export default function MagicLayers() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Qwen-Image-Layered Settings Bar */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-bold text-gray-900">Qwen-Image-Layered AI</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                Hugging Face ฟรี • เหมาะกับโปสเตอร์/กราฟิก/ข้อความ
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 flex-wrap">
+              <span className="inline-flex items-center gap-1">
+                <Key size={12} className={hasHfToken ? 'text-emerald-600' : 'text-gray-400'} />
+                <span>HF Token:</span>
+                {hasHfToken ? (
+                  <span className="inline-flex items-center gap-0.5 text-emerald-700 font-semibold">
+                    <CheckCircle2 size={11} /> มีแล้ว (ได้โควตาเพิ่ม)
+                  </span>
+                ) : (
+                  <span className="text-gray-600 font-medium">ใช้โควตาสาธารณะฟรี</span>
+                )}
+              </span>
+              {onOpenApiKeySettings && (
+                <button
+                  type="button"
+                  onClick={onOpenApiKeySettings}
+                  className="text-indigo-600 hover:underline font-semibold"
+                >
+                  {hasHfToken ? 'จัดการ' : 'ใส่ HF Token ฟรีเพื่อเพิ่มโควตา'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-600">จำนวน Layer ที่แยก:</span>
+          {[3, 4, 5, 6, 8].map((n) => (
+            <button
+              key={n}
+              type="button"
+              disabled={autoSplitting}
+              onClick={() => setTargetLayerCount(n)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ${
+                targetLayerCount === n
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {n} ชั้น
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Error Alert */}
