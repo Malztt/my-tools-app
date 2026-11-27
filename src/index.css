@@ -89,3 +89,96 @@ html.dark .hover\:bg-gray-50:hover,
 html.dark .hover\:bg-gray-100:hover {
   background-color: #334155 !important;
 }
+
+/* --- Steel Blast Door Launch Intro --- */
+.steel-door-panel {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+  background-color: #111827;
+  background-image:
+    repeating-linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.025) 0px,
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    linear-gradient(135deg, #273244 0%, #161e2e 45%, #0d1320 100%);
+  transition: transform 980ms cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+.steel-door-left {
+  clip-path: polygon(0 0, 58.2% 0, 42.2% 100%, 0 100%);
+  filter: drop-shadow(8px 0 18px rgba(0, 0, 0, 0.85));
+}
+
+.steel-door-right {
+  clip-path: polygon(57.8% 0, 100% 0, 100% 100%, 41.8% 100%);
+  filter: drop-shadow(-8px 0 18px rgba(0, 0, 0, 0.85));
+}
+
+.steel-door-open-left {
+  transform: translate3d(-108%, -8%, 0);
+}
+
+.steel-door-open-right {
+  transform: translate3d(108%, 8%, 0);
+}
+
+.steel-ribs {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.018) 0px,
+    rgba(255, 255, 255, 0.018) 2px,
+    transparent 2px,
+    transparent 44px
+  );
+  pointer-events: none;
+}
+
+.steel-rivet {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 35%, #94a3b8 0%, #334155 55%, #0f172a 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+.steel-bolt {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 35%, #cbd5e1 0%, #475569 65%, #0f172a 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.steel-seam-line {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  clip-path: polygon(57.8% 0, 58.2% 0, 42.2% 100%, 41.8% 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(249, 115, 22, 0.35) 0%,
+    rgba(251, 146, 60, 0.98) 35%,
+    rgba(254, 215, 170, 1) 50%,
+    rgba(251, 146, 60, 0.98) 65%,
+    rgba(249, 115, 22, 0.35) 100%
+  );
+  opacity: 0.22;
+  transition: opacity 260ms ease-out, filter 260ms ease-out;
+}
+
+.steel-seam-ignite {
+  opacity: 1;
+  filter: drop-shadow(0 0 14px rgba(249, 115, 22, 0.98)) drop-shadow(0 0 28px rgba(234, 88, 12, 0.85));
+}
+
+.steel-seam-fade {
+  opacity: 0;
+}

@@ -26,6 +26,7 @@ import ApiKeySettings from './tools/ApiKeySettings';
 import BulkFolderCreator from './tools/BulkFolderCreator';
 import DuplicateFinder from './tools/DuplicateFinder';
 import BackgroundRemover from './tools/BackgroundRemover';
+import SteelDoorIntro from './components/SteelDoorIntro';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -8010,6 +8011,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex transition-colors duration-200">
+      <SteelDoorIntro />
       {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />}
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 h-full flex flex-col justify-between">
