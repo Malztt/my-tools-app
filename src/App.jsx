@@ -26,6 +26,7 @@ import ApiKeySettings from './tools/ApiKeySettings';
 import BulkFolderCreator from './tools/BulkFolderCreator';
 import DuplicateFinder from './tools/DuplicateFinder';
 import BackgroundRemover from './tools/BackgroundRemover';
+import PrivacyBlur from './tools/PrivacyBlur';
 import SteelDoorIntro from './components/SteelDoorIntro';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -7932,6 +7933,7 @@ const App = () => {
       label: 'รูปภาพ & เครื่องมือ',
       items: [
         { id: 'compress_img', label: 'จัดการรูปภาพ', icon: FileImage },
+        { id: 'privacy_blur', label: 'เบลอ/ปิดข้อมูลลับ', icon: EyeOff },
         { id: 'qrcode', label: 'สร้าง QR Code', icon: QrCode },
         { id: 'xls_conv', label: 'แปลง Excel/CSV', icon: FileSpreadsheet },
       ],
@@ -8254,6 +8256,7 @@ const App = () => {
             {activeTab === 'pdf_searchable' && <PdfSearchable />}
             {activeTab === 'pdf_watermark' && <PdfWatermark />}
             {activeTab === 'bg_remover' && <BackgroundRemover />}
+            {activeTab === 'privacy_blur' && <PrivacyBlur />}
             {activeTab === 'xls_conv' && <ExcelConverter />}
             {activeTab === 'bulk_rename' && <BulkRenamer />}
             {activeTab === 'bulk_folders' && <BulkFolderCreator />}
